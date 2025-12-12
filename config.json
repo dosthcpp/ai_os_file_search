@@ -1,0 +1,8 @@
+{
+  "scan_paths": [
+    "/Users/kone/workspace/AI_OS/ai_os_file_search/test",
+    "/Users/kone/Downloads"
+  ],
+  "max_file_size_mb": 2,
+  "server_url": "http://127.0.0.1:8000/api/files/index"
+}
