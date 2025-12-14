@@ -17,5 +17,5 @@ def upload_file(path, summary, embedding, hash):
     try:
         res = requests.post(SERVER_URL, json=payload)
         print("Uploaded:", path, res.status_code)
-    except:
-        print("Upload failed:", path)
+    except Exception as e:
+        print("Upload failed:", path, "reason: ", e)

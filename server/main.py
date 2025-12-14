@@ -1,22 +1,34 @@
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
 # import chromadb
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance
 
-def startup():
-    client.recreate_collection(
-        collection_name="files",
-        vectors_config=VectorParams(size=384, distance=Distance.COSINE)
-    )
+client = QdrantClient(url="https://qdrant.drakedognas.synology.me", port=443, https=True)
 
-app = FastAPI(on_startup=startup)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    collections = client.get_collections().collections
+    names = {c.name for c in collections}
+
+    if "files" not in names:
+        client.create_collection(
+            collection_name="files",
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+        )
+
+    yield  # ⬅️ 여기서부터 request 처리
+
+    # shutdown (필요하면)
+    # client.close()
+
+app = FastAPI(lifespan=lifespan)
 
 # client = chromadb.Client()
-client = QdrantClient(url="https://qdrant.drakedognas.synology.me")
 # collection = client.create_collection("files")
-
 
 embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -49,10 +61,19 @@ def index_file(data: FileData):
 @app.get("/api/search")
 def search(q: str):
     query_emb = embed_model.encode(q).tolist()
-    # results = collection.query(query_embeddings=[query_emb], n_results=5)
-    results = client.search(
+
+    result = client.query_points(
         collection_name="files",
-        query_vector=query_emb,
+        prefetch=[],                 # optional
+        query=query_emb,             # 🔥 핵심
         limit=5
     )
-    return results
+
+    return [
+        {
+            "score": point.score,
+            "path": point.payload.get("path"),
+            "summary": point.payload.get("summary")
+        }
+        for point in result.points
+    ]
