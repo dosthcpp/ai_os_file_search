@@ -26,7 +26,11 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        # 🔥 이미 제거됐을 수도 있음
+        try:
+            self.active_connections.remove(websocket)
+        except ValueError:
+            pass  # 이미 제거된 경우 무시
 
     async def broadcast(self, message: dict):
         dead_connections = []
@@ -40,9 +44,9 @@ class ConnectionManager:
                 print("WS send error:", e)
                 dead_connections.append(connection)
 
-        # 🔥 죽은 소켓 정리
         for dc in dead_connections:
             self.disconnect(dc)
+
 
 
 manager = ConnectionManager()
