@@ -1,5 +1,7 @@
 import requests
 import json
+import time
+import os
 
 with open("config.json") as f:
     config = json.load(f)
@@ -53,3 +55,26 @@ def send_diff(path: str, old_text: str, new_text: str):
         timeout=10
     )
     res.raise_for_status()
+
+def build_node(path: str):
+    stat = os.stat(path)
+
+    return {
+        "name": os.path.basename(path),
+        "path": path,
+        "type": "dir" if os.path.isdir(path) else "file",
+        "size": stat.st_size,
+        "modified": stat.st_mtime
+    }
+
+def send_file_change(path: str, status: str):
+    requests.post(
+        f"{SERVER_URL}/api/file-change",
+        json={
+            "path": path,
+            "status": status,
+            "timestamp": time.time(),
+            "node": build_node(path)
+        },
+        timeout=5
+    )

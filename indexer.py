@@ -1,20 +1,25 @@
-import os
-import json
 import hashlib
-import os
 import json
+import os
 import time
-from text_extractor import extract_text
-from embedder import get_embedding
-from utils import load_state, save_state, update_state, handle_deleted_files, chunk_id_to_uuid, compute_diff, is_temp_file
-from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
-from chunker import chunk_text
-from embedder import get_embedding
-from client import upload_chunk, delete_chunks, upload_file, send_diff
 
 with open("config.json") as f:
     config = json.load(f)
+
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+
+from chunker import chunk_text
+from client import upload_chunk, delete_chunks, upload_file, send_diff, send_file_change
+from embedder import get_embedding
+from text_extractor import extract_text
+from utils import load_state, save_state, update_state, handle_deleted_files, chunk_id_to_uuid, compute_diff, \
+    is_temp_file
+
+import threading
+
+DELETE_DELAY = 1.0  # seconds
+pending_deletes = {}
 
 SCAN_PATHS = config["scan_paths"]
 MAX_SIZE = config["max_file_size_mb"] * 1024 * 1024
@@ -39,8 +44,16 @@ def index_file(path):
     
     if stat.st_size > MAX_SIZE:
         return
-    
+
+    current_hash = file_hash(path)
     prev_state = load_state().get(path)
+
+    is_new = prev_state is None
+    is_modified = (
+            prev_state is not None
+            and prev_state["hash"] != current_hash
+    )
+
     old_text = prev_state.get("text") if prev_state else ""
 
     text = extract_text(path)
@@ -48,7 +61,6 @@ def index_file(path):
         return
 
     chunks = chunk_text(text)
-    current_hash = file_hash(path)
 
     diff = compute_diff(old_text, text) if old_text else []
 
@@ -72,6 +84,11 @@ def index_file(path):
         )
 
     update_state(path, current_hash, chunk_ids, stat, text)
+
+    if is_new:
+        send_file_change(path, "added")
+    elif is_modified:
+        send_file_change(path, "modified")
 
     if diff:
         send_diff(
@@ -97,6 +114,16 @@ def handle_file_delete(path: str):
     state.pop(path, None)
     save_state(state)
 
+    send_file_change(path, "deleted")
+
+def finalize_delete(path):
+    # 그 사이에 다시 생겼으면 delete 취소
+    if os.path.exists(path):
+        return
+
+    handle_file_delete(path)
+    pending_deletes.pop(path, None)
+
 class FileChangeHandler(FileSystemEventHandler):
     def on_modified(self, event):
         if event.is_directory:
@@ -112,10 +139,25 @@ class FileChangeHandler(FileSystemEventHandler):
             return
         index_file(event.src_path)
 
-    def on_deleted(self, event):
+    # def on_deleted(self, event):
+    #     if event.is_directory:
+    #         return
+    #     handle_file_delete(event.src_path)
+
+    def on_deleted(self, event): # modified for Mac
         if event.is_directory:
             return
-        handle_file_delete(event.src_path)
+
+        path = event.src_path
+
+        # delete를 바로 처리하지 않음
+        timer = threading.Timer(
+            DELETE_DELAY,
+            lambda: finalize_delete(path)
+        )
+
+        pending_deletes[path] = timer
+        timer.start()
 
 def start_watchdog():
     observer = Observer()
