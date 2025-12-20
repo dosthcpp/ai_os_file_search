@@ -3,7 +3,9 @@ import json
 import time
 import os
 
-with open("config.json") as f:
+BASE_PATH = os.getcwd()
+
+with open(f"{BASE_PATH}/indexer/config.json") as f:
     config = json.load(f)
 
 SERVER_URL = config["server_url"]

@@ -3,7 +3,9 @@ import json
 import os
 import time
 
-with open("config.json") as f:
+BASE_PATH = os.getcwd()
+
+with open(f"{BASE_PATH}/indexer/config.json") as f:
     config = json.load(f)
 
 from watchdog.events import FileSystemEventHandler
