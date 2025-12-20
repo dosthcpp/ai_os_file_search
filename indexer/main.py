@@ -12,7 +12,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from chunker import chunk_text
-from client import upload_chunk, delete_chunks, upload_file, send_diff, send_file_change
+from client import upload_chunk, delete_chunks, upload_file, send_diff, send_file_change, wait_for_server
 from embedder import get_embedding
 from text_extractor import extract_text
 from utils import load_state, save_state, update_state, handle_deleted_files, chunk_id_to_uuid, compute_diff, \
@@ -64,8 +64,6 @@ def index_file(path):
 
     chunks = chunk_text(text)
 
-    diff = compute_diff(old_text, text) if old_text else []
-
     chunk_ids = []
 
     for i, chunk in enumerate(chunks):
@@ -86,6 +84,8 @@ def index_file(path):
         )
 
     update_state(path, current_hash, chunk_ids, stat, text)
+
+    diff = compute_diff(old_text, text)
 
     if is_new:
         send_file_change(path, "added")
@@ -126,20 +126,26 @@ def finalize_delete(path):
     handle_file_delete(path)
     pending_deletes.pop(path, None)
 
-class FileChangeHandler(FileSystemEventHandler):
-    def on_modified(self, event):
-        if event.is_directory:
-            return
-        if is_temp_file(event.src_path):
-            return
-        index_file(event.src_path)
+def delayed_index(path, delay=0.3):
+    def _run():
+        if os.path.exists(path):
+            index_file(path)
+    threading.Timer(delay, _run).start()
 
+class FileChangeHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
             return
         if is_temp_file(event.src_path):
             return
-        index_file(event.src_path)
+        delayed_index(event.src_path)
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        if is_temp_file(event.src_path):
+            return
+        delayed_index(event.src_path)
 
     # def on_deleted(self, event):
     #     if event.is_directory:
@@ -162,6 +168,8 @@ class FileChangeHandler(FileSystemEventHandler):
         timer.start()
 
 def start_watchdog():
+    print("Watching file changes...")
+
     observer = Observer()
     handler = FileChangeHandler()
 
@@ -169,7 +177,6 @@ def start_watchdog():
         observer.schedule(handler, path, recursive=True)
 
     observer.start()
-    print("Watching file changes...")
 
     try:
         while True:
@@ -187,6 +194,7 @@ def scan():
         for root, dirs, files in os.walk(base):
             for file in files:
                 full_path = os.path.join(root, file)
+                index_file(full_path)
 
                 try:
                     stat = os.stat(full_path)
@@ -231,5 +239,7 @@ def scan():
     save_state(new_state)
 
 if __name__ == "__main__":
-    scan()
+    # scan()
+    wait_for_server()
+    threading.Thread(target=scan, daemon=True).start()
     start_watchdog()

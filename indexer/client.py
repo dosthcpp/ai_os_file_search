@@ -10,6 +10,22 @@ with open(f"{BASE_PATH}/indexer/config.json") as f:
 
 SERVER_URL = config["server_url"]
 
+def wait_for_server(url=f"{SERVER_URL}/api/health", timeout=10):
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            r = requests.get(url, timeout=1)
+            if r.status_code == 200:
+                print("API server is ready")
+                return True
+            else:
+                print("API server is not ready, retrying...")
+        except requests.RequestException:
+            print("RequestException occurred, retrying...")
+            pass
+        time.sleep(0.5)
+    raise RuntimeError("API server not ready")
+
 def upload_file(path, summary, embedding, hash):
     payload = {
         "path": path,
@@ -69,14 +85,18 @@ def build_node(path: str):
         "modified": stat.st_mtime
     }
 
-def send_file_change(path: str, status: str):
+def send_file_change(path, status):
+    payload = {
+        "path": path,
+        "status": status,
+        "timestamp": time.time(),
+    }
+
+    if status != "deleted":
+        payload["node"] = build_node(path)
+
     requests.post(
         f"{SERVER_URL}/api/file-change",
-        json={
-            "path": path,
-            "status": status,
-            "timestamp": time.time(),
-            "node": build_node(path)
-        },
+        json=payload,
         timeout=5
     )

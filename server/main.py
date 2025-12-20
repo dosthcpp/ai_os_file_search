@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from contextlib import asynccontextmanager
 from enum import Enum
 from time import time
@@ -10,12 +11,32 @@ from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import PointStruct
 from qdrant_client.models import VectorParams, Distance
-# import chromadb
-from sentence_transformers import SentenceTransformer
 from starlette.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketDisconnect, WebSocket
 
-client = QdrantClient(url="https://qdrant.drakedognas.synology.me", port=443, https=True)
+# Windows 콘솔 UTF-8 설정
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
+# 🔥 전역 변수로 선언만 (lazy loading)
+client = None
+embed_model = None
+
+def get_client():
+    global client
+    if client is None:
+        client = QdrantClient(url="https://qdrant.drakedognas.synology.me", port=443, https=True)
+    return client
+
+def get_embed_model():
+    global embed_model
+    if embed_model is None:
+        from sentence_transformers import SentenceTransformer
+        print("[LOAD] Loading embedding model...")
+        embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+        print("[OK] Embedding model loaded")
+    return embed_model
 
 class ConnectionManager:
     def __init__(self):
@@ -26,11 +47,10 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        # 🔥 이미 제거됐을 수도 있음
         try:
             self.active_connections.remove(websocket)
         except ValueError:
-            pass  # 이미 제거된 경우 무시
+            pass
 
     async def broadcast(self, message: dict):
         dead_connections = []
@@ -47,8 +67,6 @@ class ConnectionManager:
         for dc in dead_connections:
             self.disconnect(dc)
 
-
-
 manager = ConnectionManager()
 
 async def notify_file_change(action: str, path: str, node: dict | None = None):
@@ -60,6 +78,7 @@ async def notify_file_change(action: str, path: str, node: dict | None = None):
     })
 
 def get_latest_diff(path: str):
+    client = get_client()
     points, _ = client.scroll(
         collection_name="file_diffs",
         with_payload=True,
@@ -71,13 +90,12 @@ def get_latest_diff(path: str):
                 }
             ]
         },
-        limit=50  # 충분히 크게
+        limit=50
     )
 
     if not points:
         return None
 
-    # timestamp 기준 최신 1개 선택
     latest = max(points, key=lambda p: p.payload["timestamp"])
     return latest.payload
 
@@ -126,10 +144,7 @@ def build_tree(file_changes: list[dict]):
     }
 
 def build_tree_from_qdrant():
-    """
-    Qdrant에 저장된 FILE_CHANGE / DIFF 정보를 기반으로
-    프론트에서 쓰는 파일 트리 구조 생성
-    """
+    client = get_client()
     records = client.scroll(
         collection_name="file_changes",
         with_payload=True,
@@ -137,17 +152,14 @@ def build_tree_from_qdrant():
     )[0]
 
     changes = [r.payload for r in records]
-
     return build_tree(changes)
 
 async def notify_tree_update():
-    tree = build_tree_from_qdrant()  # 네 기존 로직
+    tree = build_tree_from_qdrant()
     await manager.broadcast({
         "type": "tree",
         "tree": tree
     })
-
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 class FileStatus(str, Enum):
     added = "added"
@@ -176,42 +188,54 @@ class DiffPayload(BaseModel):
     old_text: str
     new_text: str
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # startup
-    app.state.loop = asyncio.get_running_loop()
+# 🔥 백그라운드 초기화 태스크
+async def init_collections():
+    """백그라운드에서 컬렉션 초기화"""
+    print("[INFO] Initializing Qdrant collections...")
+    client = get_client()
+
     collections = client.get_collections().collections
     names = {c.name for c in collections}
-
-    # event_handler = FileChangeHandler()
-    # observer = Observer()
-    # observer.schedule(event_handler, WATCH_PATH, recursive=True)
-    # observer.start()
-    # app.state.observer = observer
 
     if "files" not in names:
         client.create_collection(
             collection_name="files",
             vectors_config=VectorParams(size=384, distance=Distance.COSINE)
         )
+        print("[OK] Created 'files' collection")
 
     if "file_changes" not in names:
         client.create_collection(
             collection_name="file_changes",
             vectors_config=VectorParams(size=1, distance=Distance.COSINE)
         )
+        print("[OK] Created 'file_changes' collection")
 
     if "file_diffs" not in names:
         client.create_collection(
             collection_name="file_diffs",
             vectors_config=VectorParams(size=1, distance=Distance.COSINE)
         )
+        print("[OK] Created 'file_diffs' collection")
 
-    yield  # ⬅️ 여기서부터 request 처리
+    print("[OK] Qdrant collections ready")
 
-    # shutdown (필요하면)
-    # observer.stop()
-    # observer.join()
+async def warmup_model():
+    """백그라운드에서 임베딩 모델 로드"""
+    await asyncio.sleep(0.1)  # 서버 시작 우선순위
+    get_embed_model()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("[START] Server starting...")
+
+    # 백그라운드 태스크로 실행 (블로킹 안 함)
+    asyncio.create_task(init_collections())
+    asyncio.create_task(warmup_model())
+
+    print("[READY] Server ready (background tasks running)")
+    yield
+    print("[STOP] Server shutting down")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -223,13 +247,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/api/health")
+def health():
+    return {
+        "status": "ok",
+        "embed_model_loaded": embed_model is not None,
+        "client_initialized": client is not None
+    }
+
 @app.post("/api/files/index")
 def index_file(data: FileData):
-    # collection.add(
-    #     ids=[data.hash],
-    #     metadatas=[{"path": data.path, "summary": data.summary}],
-    #     embeddings=[data.embedding]
-    # )
+    client = get_client()
     client.upsert(
         collection_name="files",
         points=[
@@ -240,17 +268,19 @@ def index_file(data: FileData):
             }
         ]
     )
-
     return {"status": "ok"}
 
 @app.get("/api/search")
 def search(q: str):
-    query_emb = embed_model.encode(q).tolist()
+    client = get_client()
+    model = get_embed_model()  # 🔥 lazy loading
+
+    query_emb = model.encode(q).tolist()
 
     result = client.query_points(
         collection_name="files",
-        prefetch=[],                 # optional
-        query=query_emb,             # 🔥 핵심
+        prefetch=[],
+        query=query_emb,
         limit=5
     )
 
@@ -265,6 +295,7 @@ def search(q: str):
 
 @app.post("/api/delete")
 def delete_points(ids: List[str]):
+    client = get_client()
     client.delete(
         collection_name="files",
         points_selector=ids
@@ -273,6 +304,7 @@ def delete_points(ids: List[str]):
 
 @app.post("/api/chunks/upsert")
 def upsert_chunk(data: ChunkData):
+    client = get_client()
     client.upsert(
         collection_name="files",
         points=[{
@@ -285,6 +317,7 @@ def upsert_chunk(data: ChunkData):
 
 @app.post("/api/diff")
 def save_diff(payload: DiffPayload):
+    client = get_client()
     client.upsert(
         collection_name="file_diffs",
         points=[PointStruct(
@@ -315,9 +348,10 @@ def get_diff(path: str):
 
 @app.post("/api/file-change")
 async def record_file_change(payload: FileChangePayload):
+    client = get_client()
     point = PointStruct(
         id=str(uuid4()),
-        vector=[0.0],  # dummy vector
+        vector=[0.0],
         payload={
             "path": payload.path,
             "status": payload.status,
@@ -331,16 +365,15 @@ async def record_file_change(payload: FileChangePayload):
     await notify_file_change(
         payload.status,
         payload.path,
-        payload.node   # 그대로 WS로 전달
+        payload.node
     )
-
-    # 2️⃣ 🔥 tree 전체 재전송 (핵심)
     await notify_tree_update()
 
     return {"ok": True}
 
 @app.get("/api/changed-files")
 def get_changed_files():
+    client = get_client()
     points, _ = client.scroll(
         collection_name="file_changes",
         limit=100,
@@ -354,6 +387,7 @@ def get_changed_files():
     )
 
 def latest_file_changes():
+    client = get_client()
     points, _ = client.scroll(
         collection_name="file_changes",
         with_payload=True,
@@ -379,7 +413,6 @@ def get_changed_files_tree():
 async def websocket_file_tree(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        # 🔥 최초 1회 tree 전송
         tree = build_tree_from_qdrant()
         await websocket.send_json({
             "type": "tree",
@@ -394,7 +427,3 @@ async def websocket_file_tree(websocket: WebSocket):
     except Exception as e:
         print("ws error:", e)
         manager.disconnect(websocket)
-
-
-
-

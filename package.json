@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "dev:windows": ".\\.venv\\Scripts\\activate && concurrently -k -n api,indexer,web -c blue,green,magenta \"uvicorn server.main:app --reload --port 8000\" \"python -u indexer/main.py\" \"cd webapp && yarn dev\"",
-    "dev:mac": "concurrently -k -n api,indexer,web -c blue,green,magenta \"uvicorn server.main:app --reload --port 8000\" \"python -u indexer/main.py\" \"cd webapp && yarn dev\""
+    "dev:windows": "concurrently -n api,indexer,web -c blue,green,magenta \"python -m uvicorn server.main:app --reload --reload-dir .\\server --port 8000\" \"python -u indexer/main.py\" \"cd webapp && yarn dev\"",
+    "dev:mac": "concurrently -n api,indexer,web -c blue,green,magenta \"uvicorn server.main:app --reload --reload-dir .\\server --port 8000\" \"python -u indexer/main.py\" \"cd webapp && yarn dev\""
   }
 }
