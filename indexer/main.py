@@ -12,7 +12,8 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from chunker import chunk_text
-from client import upload_chunk, delete_chunks, upload_file, send_diff, send_file_change, wait_for_server
+from client import upload_chunk, delete_chunks, upload_file, send_diff, send_file_change, wait_for_server, \
+    fetch_watch_paths
 from embedder import get_embedding
 from text_extractor import extract_text
 from utils import load_state, save_state, update_state, handle_deleted_files, chunk_id_to_uuid, compute_diff, \
@@ -23,16 +24,25 @@ import threading
 DELETE_DELAY = 1.0  # seconds
 pending_deletes = {}
 
-SCAN_PATHS = config["scan_paths"]
+def cancel_pending_delete(path: str):
+    t = pending_deletes.pop(path, None)
+    if t:
+        t.cancel()
+
+# SCAN_PATHS = config["scan_paths"]
 MAX_SIZE = config["max_file_size_mb"] * 1024 * 1024
 
 def file_hash(path):
     h = hashlib.md5()
     with open(path, "rb") as f:
-        h.update(f.read())
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
     return h.hexdigest()
 
-def index_file(path):
+INFLIGHT = set()
+INFLIGHT_LOCK = threading.Lock()
+
+def index_file(path, from_scan=False):
     if is_temp_file(path):
         return
     
@@ -47,57 +57,71 @@ def index_file(path):
     if stat.st_size > MAX_SIZE:
         return
 
-    current_hash = file_hash(path)
-    prev_state = load_state().get(path)
+    if not from_scan:
+        for scanning_path in SCANNING_PATHS:
+            if path.startswith(scanning_path):
+                return
 
-    is_new = prev_state is None
-    is_modified = (
-            prev_state is not None
-            and prev_state["hash"] != current_hash
-    )
+    with INFLIGHT_LOCK:
+        if path in INFLIGHT:
+            return
+        INFLIGHT.add(path)
 
-    old_text = prev_state.get("text") if prev_state else ""
+    try:
+        current_hash = file_hash(path)
+        prev_state = load_state().get(path)
 
-    text = extract_text(path)
-    if not text:
-        return
-
-    chunks = chunk_text(text)
-
-    chunk_ids = []
-
-    for i, chunk in enumerate(chunks):
-        emb = get_embedding(chunk)
-        logical_id = f"{file_hash(path)}_{i}"
-        chunk_id = chunk_id_to_uuid(logical_id)
-        chunk_ids.append(chunk_id)
-
-        # ✅ 서버 API 호출
-        upload_chunk(
-            chunk_id=chunk_id,
-            vector=emb,
-            payload={
-                "path": path,
-                "chunk_index": i,
-                "text": chunk[:300]
-            }
+        is_new = prev_state is None
+        is_modified = (
+                prev_state is not None
+                and prev_state["hash"] != current_hash
         )
 
-    update_state(path, current_hash, chunk_ids, stat, text)
+        old_text = prev_state.get("text") if prev_state else ""
 
-    diff = compute_diff(old_text, text)
+        text = extract_text(path)
+        if not text:
+            return
 
-    if is_new:
-        send_file_change(path, "added")
-    elif is_modified:
-        send_file_change(path, "modified")
+        chunks = chunk_text(text)
 
-    if diff:
-        send_diff(
-            path=path,
-            old_text=old_text or "",
-            new_text=text
-        )
+        chunk_ids = []
+
+        for i, chunk in enumerate(chunks):
+            emb = get_embedding(chunk)
+            logical_id = f"{file_hash(path)}_{i}"
+            chunk_id = chunk_id_to_uuid(logical_id)
+            chunk_ids.append(chunk_id)
+
+            # ✅ 서버 API 호출
+            upload_chunk(
+                chunk_id=chunk_id,
+                vector=emb,
+                payload={
+                    "path": path,
+                    "chunk_index": i,
+                    "text": chunk[:300]
+                }
+            )
+
+        update_state(path, current_hash, chunk_ids, stat, text)
+
+        diff = compute_diff(old_text, text)
+
+        if is_new:
+            send_file_change(path, "added")
+        elif is_modified:
+            send_file_change(path, "modified")
+
+        if diff:
+            send_diff(
+                path=path,
+                old_text=old_text or "",
+                new_text=text
+            )
+    finally:
+        with INFLIGHT_LOCK:
+            INFLIGHT.discard(path)
 
 def handle_file_delete(path: str):
     state = load_state()
@@ -138,6 +162,7 @@ class FileChangeHandler(FileSystemEventHandler):
             return
         if is_temp_file(event.src_path):
             return
+        cancel_pending_delete(event.src_path)
         delayed_index(event.src_path)
 
     def on_modified(self, event):
@@ -145,6 +170,7 @@ class FileChangeHandler(FileSystemEventHandler):
             return
         if is_temp_file(event.src_path):
             return
+        cancel_pending_delete(event.src_path)
         delayed_index(event.src_path)
 
     # def on_deleted(self, event):
@@ -167,79 +193,140 @@ class FileChangeHandler(FileSystemEventHandler):
         pending_deletes[path] = timer
         timer.start()
 
-def start_watchdog():
-    print("Watching file changes...")
+observer = None
+current_paths: set[str] = set()
+observer_lock = threading.Lock()
+handler = FileChangeHandler()
+SCANNING_PATHS: set[str] = set()
+SCANNING_LOCK = threading.Lock()
 
-    observer = Observer()
-    handler = FileChangeHandler()
+def initial_scan_path(path: str):
+    print("initial scan:", path, flush=True)
 
-    for path in SCAN_PATHS:
-        observer.schedule(handler, path, recursive=True)
+    # ✅ 스캔 전에 prev 스냅샷
+    state_before = load_state()
+    prev_state = {k: v for k, v in state_before.items() if k.startswith(path)}
 
-    observer.start()
+    with SCANNING_LOCK:
+        SCANNING_PATHS.add(path)
+    try:
+        scan_directory(path)  # 내부에서 update_state로 state를 갱신함
+    finally:
+        with SCANNING_LOCK:
+            SCANNING_PATHS.remove(path)
 
+    # ✅ 스캔 후 최신 state 로드
+    state_after = load_state()
+
+    # ✅ 삭제 반영 (prev_state vs state_after)
+    handle_deleted_files(prev_state, state_after)
+    save_state(state_after)
+
+def restart_watchdog(new_paths: set[str]):
+    global observer, current_paths
+    added = new_paths - current_paths
+
+    with observer_lock:
+        if observer:
+            observer.stop()
+            observer.join()
+
+        observer = Observer()
+
+        for path in new_paths:
+            observer.schedule(handler, path, recursive=True)
+
+        observer.start()
+        current_paths = new_paths
+
+    for p in added:
+        threading.Thread(target=initial_scan_path, args=(p,), daemon=True).start()
+
+    print("watchdog restarted:", new_paths, flush=True)
+
+def watch_path_watcher(interval=5):
+    global current_paths
+
+    while True:
+        try:
+            paths = set(fetch_watch_paths())
+
+            if paths != current_paths:
+                restart_watchdog(paths)
+
+        except Exception as e:
+            print("watch path fetch failed:", e, flush=True)
+
+        time.sleep(interval)
+
+def scan_directory(
+    base: str
+):
+    for root, _, files in os.walk(base):
+        for file in files:
+            full_path = os.path.join(root, file)
+            index_file(full_path, from_scan=True)
+            #
+            # try:
+            #     stat = os.stat(full_path)
+            # except FileNotFoundError:
+            #     continue
+            #
+            # if stat.st_size > MAX_SIZE:
+            #     continue
+            #
+            # current_hash = file_hash(full_path)
+            # prev = prev_state.get(full_path)
+            #
+            # # 변화 없음
+            # if prev and prev["hash"] == current_hash:
+            #     new_state[full_path] = prev
+            #     continue
+            #
+            # text = extract_text(full_path)
+            # if not text:
+            #     continue
+            #
+            # summary = text[:300]
+            # embedding = get_embedding(summary)
+            #
+            # upload_file(
+            #     path=full_path,
+            #     summary=summary,
+            #     embedding=embedding,
+            #     hash=current_hash
+            # )
+            #
+            # new_state[full_path] = {
+            #     "hash": current_hash,
+            #     "mtime": stat.st_mtime,
+            #     "size": stat.st_size
+            # }
+
+def scan():
+    paths = fetch_watch_paths()
+
+    for path in paths:
+        initial_scan_path(path)
+
+if __name__ == "__main__":
+    wait_for_server()
+
+    # 초기 scan
+    threading.Thread(target=scan, daemon=True).start()
+
+    # watch path 변경 감시
+    threading.Thread(
+        target=watch_path_watcher,
+        daemon=True
+    ).start()
+
+    # 메인 루프 유지
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        observer.stop()
+        if observer:
+            observer.stop()
+            observer.join()
 
-    observer.join()
-
-def scan():
-    prev_state = load_state()
-    new_state = {}
-
-    for base in SCAN_PATHS:
-        for root, dirs, files in os.walk(base):
-            for file in files:
-                full_path = os.path.join(root, file)
-                index_file(full_path)
-
-                try:
-                    stat = os.stat(full_path)
-                except FileNotFoundError:
-                    continue
-
-                if stat.st_size > MAX_SIZE:
-                    continue
-
-                prev = prev_state.get(full_path)
-                current_hash = file_hash(full_path)
-
-                # 🔹 변화 없음 → skip
-                if prev and prev["hash"] == current_hash:
-                    new_state[full_path] = prev
-                    continue
-
-                # 🔥 신규 or 변경된 파일만 여기로 옴
-                text = extract_text(full_path)
-                if not text:
-                    continue
-
-                summary = text[:300]
-                embedding = get_embedding(summary)
-
-                upload_file(
-                    path=full_path,
-                    summary=summary,
-                    embedding=embedding,
-                    hash=current_hash
-                )
-
-                new_state[full_path] = {
-                    "hash": current_hash,
-                    "mtime": stat.st_mtime,
-                    "size": stat.st_size
-                }
-
-    handle_deleted_files(prev_state, new_state)
-
-    # 🔥 상태 저장
-    save_state(new_state)
-
-if __name__ == "__main__":
-    # scan()
-    wait_for_server()
-    threading.Thread(target=scan, daemon=True).start()
-    start_watchdog()

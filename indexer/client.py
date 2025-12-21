@@ -26,6 +26,10 @@ def wait_for_server(url=f"{SERVER_URL}/api/health", timeout=10):
         time.sleep(0.5)
     raise RuntimeError("API server not ready")
 
+def fetch_watch_paths():
+    res = requests.get(f"{SERVER_URL}/api/watch-paths")
+    return res.json()
+
 def upload_file(path, summary, embedding, hash):
     payload = {
         "path": path,

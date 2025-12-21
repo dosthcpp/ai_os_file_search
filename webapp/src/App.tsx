@@ -2,6 +2,8 @@ import { useState } from "react";
 import FileTree from "./components/FileTree";
 import DiffViewer from "./components/DiffViewer";
 import { fetchDiff } from "./api";
+import WatchPathSettings from "./components/WatchPathSettings.tsx";
+import {Divider} from "antd";
 
 export default function App() {
     const [original, setOriginal] = useState("");
@@ -15,13 +17,17 @@ export default function App() {
     };
 
     return (
-        <div style={{ display: "flex", height: "100vh", width: "100vw" }}>
-            <div style={{ width: "30%", borderRight: "1px solid #ddd" }}>
-                <FileTree onSelectFile={handleSelectFile} />
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: "flex", height: "100vh", width: "100vw" }}>
+                <div style={{ width: "30%" }}>
+                    <WatchPathSettings />
+                    <Divider />
+                    <FileTree onSelectFile={handleSelectFile} />
+                </div>
 
-            <div style={{ flex: 1 }}>
-                <DiffViewer original={original} modified={modified} />
+                <div style={{ flex: 1 }}>
+                    <DiffViewer original={original} modified={modified} />
+                </div>
             </div>
         </div>
     );

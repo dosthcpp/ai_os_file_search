@@ -5,6 +5,7 @@ from enum import Enum
 from time import time
 from typing import List
 from uuid import uuid4
+from pathlib import Path
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -254,6 +255,29 @@ def health():
         "embed_model_loaded": embed_model is not None,
         "client_initialized": client is not None
     }
+
+WATCH_PATHS = []
+class PathData(BaseModel):
+    path: str
+
+@app.post("/api/watch-path")
+def set_watch_path(path: PathData):
+    try:
+        p = Path(path.path)
+        if p.is_dir():
+            WATCH_PATHS.append(path.path)
+            return {"ok": True}
+        else:
+            return {"ok": False}
+    except OSError:
+        return {"ok": False}
+    except ValueError:
+        return {"ok": False}
+
+
+@app.get("/api/watch-paths")
+def get_watch_path():
+    return WATCH_PATHS
 
 @app.post("/api/files/index")
 def index_file(data: FileData):

@@ -15,3 +15,18 @@ export const fetchDiff = async (path: string) => {
     });
     return res.data;
 };
+
+export async function getWatchPaths() {
+    const res = await api.get('/api/watch-paths');
+    return res.data as string[];
+}
+
+export async function addWatchPath(path: string) {
+    const res = await api.post('/api/watch-path', { path });
+    return res.data;
+}
+
+// export async function removeWatchPath(path: string) {
+//     const res = await axios.delete('/api/watch-path', { path });
+//     return res.data;
+// }
