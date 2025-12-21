@@ -104,3 +104,19 @@ def send_file_change(path, status):
         json=payload,
         timeout=5
     )
+
+def save_file_change(path, version, diff, summary, vector, _hash, change_type):
+    payload = {
+        "path": path,
+        "version": version,
+        "diff": diff,
+        "summary": summary,
+        "vector": vector,
+        "hash": _hash,
+        "change_type": change_type
+    }
+    requests.post(
+        f"{SERVER_URL}/api/save-file-version",
+        json=payload,
+        timeout=5
+    )

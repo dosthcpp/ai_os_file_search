@@ -12,15 +12,25 @@ NAMESPACE = uuid.UUID("20b57fa4-ec8b-4ce0-b0d5-7b56a25385db")
 TEMP_PREFIXES = ("~",)
 TEMP_EXTENSIONS = (".tmp",)
 
+def ensure_state_file():
+    if not os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "w") as f:
+            json.dump({}, f)
+
 def chunk_id_to_uuid(chunk_id: str) -> str:
     return str(uuid.uuid5(NAMESPACE, chunk_id))
 
-
 def load_state():
     if not os.path.exists(STATE_FILE):
+        save_state({})
         return {}
-    with open(STATE_FILE, "r") as f:
-        return json.load(f)
+
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        save_state({})
+        return {}
 
 def save_state(state):
     with open(STATE_FILE, "w") as f:
@@ -31,18 +41,25 @@ def update_state(
     file_hash: str,
     chunk_ids: list[str],
     stat,
-    text: str           # 🔥 추가
+    text: str,
+    version: int = None
 ):
     state = load_state()
 
-    state[path] = {
+    entry = state.get(path, {})
+
+    entry.update({
         "hash": file_hash,
         "chunks": chunk_ids,
         "mtime": stat.st_mtime,
         "size": stat.st_size,
-        "text": text     # 🔥 이전 전체 텍스트 저장
-    }
+        "text": text,
+    })
 
+    if version is not None:
+        entry["version"] = version  # ⭐ 여기
+
+    state[path] = entry
     save_state(state)
 
 def handle_deleted_files(prev_state, new_state):

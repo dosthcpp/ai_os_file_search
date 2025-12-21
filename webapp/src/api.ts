@@ -26,6 +26,25 @@ export async function addWatchPath(path: string) {
     return res.data;
 }
 
+export async function getVersion(path: string) {
+    const res = await api.get('/api/files/versions', {
+        params: {
+            path,
+        }
+    });
+    return res.data;
+}
+
+export async function getVersionDiff(path: string, version: number) {
+    const res = await api.get('/api/files/version/diff', {
+        params: {
+            path,
+            version
+        }
+    });
+    return res.data;
+}
+
 // export async function removeWatchPath(path: string) {
 //     const res = await axios.delete('/api/watch-path', { path });
 //     return res.data;

@@ -2,7 +2,7 @@ import asyncio
 import sys
 from contextlib import asynccontextmanager
 from enum import Enum
-from time import time
+from time import time as now
 from typing import List
 from uuid import uuid4
 from pathlib import Path
@@ -179,6 +179,15 @@ class FileData(BaseModel):
     embedding: list
     hash: str
 
+class FileVersionData(BaseModel):
+    path: str
+    version: int
+    diff: list[str]
+    vector: list[float]
+    summary: str
+    hash: str
+    change_type: str
+
 class ChunkData(BaseModel):
     id: str
     vector: list[float]
@@ -209,15 +218,23 @@ async def init_collections():
         client.create_collection(
             collection_name="file_changes",
             vectors_config=VectorParams(size=1, distance=Distance.COSINE)
+            # vectors_config=None
         )
         print("[OK] Created 'file_changes' collection")
 
     if "file_diffs" not in names:
         client.create_collection(
             collection_name="file_diffs",
-            vectors_config=VectorParams(size=1, distance=Distance.COSINE)
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE)
         )
         print("[OK] Created 'file_diffs' collection")
+
+    if "file_versions" not in names:
+        client.create_collection(
+            collection_name="file_versions",
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+        )
+        print("[OK] Created 'file_versions' collection")
 
     print("[OK] Qdrant collections ready")
 
@@ -279,6 +296,30 @@ def set_watch_path(path: PathData):
 def get_watch_path():
     return WATCH_PATHS
 
+@app.get("/api/files")
+def list_files():
+    points, _ = client.scroll(
+        collection_name="file_versions",
+        with_payload=True,
+        with_vectors=False,
+        limit=10_000
+    )
+
+    latest = {}
+
+    for p in points:
+        path = p.payload["path"]
+        v = p.payload["version"]
+
+        if path not in latest or v > latest[path]["version"]:
+            latest[path] = {
+                "path": path,
+                "version": v,
+                "timestamp": p.payload["timestamp"],
+            }
+
+    return list(latest.values())
+
 @app.post("/api/files/index")
 def index_file(data: FileData):
     client = get_client()
@@ -293,6 +334,34 @@ def index_file(data: FileData):
         ]
     )
     return {"status": "ok"}
+
+@app.get("/api/files/versions")
+def list_file_versions(path: str):
+    points, _ = client.scroll(
+        collection_name="file_versions",
+        scroll_filter={
+            "must": [
+                {"key": "path", "match": {"value": path}}
+            ]
+        },
+        with_payload=True,
+        with_vectors=False,
+        limit=100
+    )
+
+    return sorted(
+        [
+            {
+                "version": p.payload["version"],
+                "timestamp": p.payload["timestamp"],
+                "change_type": p.payload["change_type"],
+                "summary": p.payload["summary"],
+            }
+            for p in points
+        ],
+        key=lambda x: x["version"],
+        reverse=True
+    )
 
 @app.get("/api/search")
 def search(q: str):
@@ -341,17 +410,22 @@ def upsert_chunk(data: ChunkData):
 
 @app.post("/api/diff")
 def save_diff(payload: DiffPayload):
+    global client
     client = get_client()
+
+    model = get_embed_model()
+    text = payload.old_text + "\n" + payload.new_text
+    vector = model.encode(text).tolist()
     client.upsert(
         collection_name="file_diffs",
         points=[PointStruct(
             id=str(uuid4()),
-            vector=[0.0],
+            vector=vector,
             payload={
                 "path": payload.path,
                 "old_text": payload.old_text,
                 "new_text": payload.new_text,
-                "timestamp": time()
+                "timestamp": now()
             }
         )]
     )
@@ -368,6 +442,28 @@ def get_diff(path: str):
         "old_text": diff["old_text"],
         "new_text": diff["new_text"],
         "timestamp": diff["timestamp"]
+    }
+
+@app.get("/api/files/version/diff")
+def get_version_diff(path: str, version: int):
+    points, _ = client.scroll(
+        collection_name="file_versions",
+        scroll_filter={
+            "must": [
+                {"key": "path", "match": {"value": path}},
+                {"key": "version", "match": {"value": version}},
+            ]
+        },
+        with_payload=True,
+        with_vectors=False,
+        limit=1
+    )
+
+    if not points:
+        return {"diff": ""}
+
+    return {
+        "diff": points[0].payload["diff"]
     }
 
 @app.post("/api/file-change")
@@ -433,6 +529,28 @@ def get_changed_files_tree():
     file_changes = latest_file_changes()
     return build_tree(file_changes)
 
+@app.post("/api/save-file-version")
+def save_file_version(
+    data: FileVersionData
+):
+    client.upsert(
+        collection_name="file_versions",
+        points=[{
+            # "id": f"file::{data.path}::v{data.version}",
+            "id": str(uuid4()),
+            "vector": list(map(float, data.vector)),
+            "payload": {
+                "path": data.path,
+                "version": data.version,
+                "hash": data.hash,
+                "timestamp": now(),
+                "change_type": data.change_type,
+                "diff": data.diff,
+                "summary": data.summary,
+            }
+        }]
+    )
+
 @app.websocket("/ws/file-tree")
 async def websocket_file_tree(websocket: WebSocket):
     await manager.connect(websocket)
@@ -444,8 +562,11 @@ async def websocket_file_tree(websocket: WebSocket):
         })
 
         while True:
-            await websocket.send_json({"type": "ping"})
-            await asyncio.sleep(30)
+            try:
+                await websocket.send_json({"type": "ping"})
+                await asyncio.sleep(30)
+            except WebSocketDisconnect:
+                break
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
