@@ -1,6 +1,17 @@
 {
+  "name": "ai-os",
+  "private": true,
   "scripts": {
-    "dev:windows": "concurrently -n api,indexer,web -c blue,green,magenta \"python -m uvicorn server.main:app --reload --reload-dir .\\server --port 8000\" \"python -u indexer/main.py\" \"cd webapp && yarn dev\"",
-    "dev:mac": "concurrently -n api,indexer,web -c blue,green,magenta \"uvicorn server.main:app --reload --reload-dir .\\server --port 8000\" \"python -u indexer/main.py\" \"cd webapp && yarn dev\""
+    "dev": "concurrently -n api,indexer,web -c blue,green,magenta \"npm run api\" \"npm run indexer\" \"npm run web\"",
+    "api": "python -m uvicorn main:app --app-dir apps/search_api --reload --port 8000",
+    "indexer": "python -u packages/file-indexer/main.py",
+    "web": "cd webapp && yarn dev",
+    "install:api": "pip install -r apps/search_api/requirements.txt",
+    "install:indexer": "pip install -r packages/file-indexer/requirements.txt",
+    "install:web": "cd webapp && yarn install",
+    "install:all": "npm run install:api && npm run install:indexer && npm run install:web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
   }
 }
