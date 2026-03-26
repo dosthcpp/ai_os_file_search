@@ -1,12 +1,25 @@
 """
 AI OS — File Indexer
-파일 시스템을 감시하고 변경 내용을 search-api로 전송합니다.
+
+Daemon that watches configured directories for file changes and sends
+embeddings + metadata to the Search API server.
+
+Flow:
+  1. Wait for the API server to be ready.
+  2. Poll /api/watch-paths every 5 s; restart watchdog whenever the list changes.
+  3. On file create/modify: extract text → chunk → embed → upload chunks.
+  4. On file delete: remove chunks from the index and record a deletion version.
+  5. On startup: scan all configured paths to catch any changes that occurred
+     while the indexer was offline.
 """
+from __future__ import annotations
 import hashlib
+import json
 import os
 import sys
 import threading
 import time
+from pathlib import Path
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -36,25 +49,17 @@ from utils import (
     update_state,
 )
 
-# ── embedding (lazy) ──────────────────────────────────────────────────────────
-_embed_model = None
-
-def get_embedding(text: str) -> list[float]:
-    global _embed_model
-    if _embed_model is None:
-        from sentence_transformers import SentenceTransformer
-        _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _embed_model.encode(text).tolist()
+# ── embedding (OpenAI, shared core module) ────────────────────────────────────
+ROOT_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT_DIR / "packages" / "core"))
+from embedder import get_embedding  # noqa: E402
 
 # ── config ────────────────────────────────────────────────────────────────────
-import json
-from pathlib import Path
-
-ROOT_DIR = Path(__file__).resolve().parents[2]
 SETTINGS_FILE = ROOT_DIR / "config" / "settings.json"
 
 
 def max_file_size() -> int:
+    """Return the maximum indexable file size in bytes (from settings.json)."""
     try:
         s = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         return s.get("max_file_size_mb", 2) * 1024 * 1024
@@ -63,34 +68,38 @@ def max_file_size() -> int:
 
 
 # ── delete debounce ───────────────────────────────────────────────────────────
-DELETE_DELAY = 1.0
+DELETE_DELAY = 1.0  # seconds to wait before confirming a delete event
 _pending_deletes: dict[str, threading.Timer] = {}
 
 
 def _cancel_pending_delete(path: str):
+    """Cancel a scheduled delete if the file was recreated/modified."""
     t = _pending_deletes.pop(path, None)
     if t:
         t.cancel()
 
 
-# ── inflight guard ────────────────────────────────────────────────────────────
+# ── in-flight guard (prevents double-indexing the same file) ──────────────────
 INFLIGHT: set[str] = set()
 INFLIGHT_LOCK = threading.Lock()
 
-# ── scanning guard ────────────────────────────────────────────────────────────
+# ── scanning guard (suppresses watchdog events during initial scan) ───────────
 SCANNING_PATHS: set[str] = set()
 SCANNING_LOCK = threading.Lock()
 
 
-# ── diff summary ──────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
+
 def _summarize_diff(diff: list[str], max_len: int = 200) -> str:
-    added = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
-    removed = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
+    """Return a human-readable summary of a unified diff."""
+    added = sum(1 for line in diff if line.startswith("+") and not line.startswith("+++"))
+    removed = sum(1 for line in diff if line.startswith("-") and not line.startswith("---"))
     preview = " ".join(diff[:5])
     return f"Added {added} lines, removed {removed} lines. Changes: {preview[:max_len]}"
 
 
 def _file_hash(path: str) -> str:
+    """Return the MD5 hex digest of a file's contents."""
     h = hashlib.md5()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -99,7 +108,20 @@ def _file_hash(path: str) -> str:
 
 
 # ── core indexing logic ───────────────────────────────────────────────────────
+
 def index_file(path: str, from_scan: bool = False):
+    """
+    Index a single file: extract text, generate embeddings, upload chunks.
+
+    Skips the file if:
+      - it is a temp file
+      - it no longer exists
+      - it exceeds the size limit
+      - it is being indexed by another thread
+      - it has not changed since last index (same hash)
+      - a directory scan is currently running for its parent path (unless
+        this call is itself part of that scan, i.e. from_scan=True)
+    """
     if is_temp_file(path) or not os.path.exists(path):
         return
 
@@ -111,6 +133,7 @@ def index_file(path: str, from_scan: bool = False):
     if stat.st_size > max_file_size():
         return
 
+    # Suppress watchdog events fired during an ongoing initial scan
     if not from_scan:
         with SCANNING_LOCK:
             for p in SCANNING_PATHS:
@@ -159,18 +182,22 @@ def index_file(path: str, from_scan: bool = False):
 
         if is_new:
             send_file_change(path, "added")
-            save_file_version(path=path, version=new_version, diff=diff,
-                              summary="Initial version",
-                              vector=get_embedding("Initial version"),
-                              file_hash=current_hash, change_type="added")
+            save_file_version(
+                path=path, version=new_version, diff=diff,
+                summary="Initial version",
+                vector=get_embedding("Initial version"),
+                file_hash=current_hash, change_type="added",
+            )
 
         elif is_modified and diff:
             summary = _summarize_diff(diff)
             send_file_change(path, "modified")
-            save_file_version(path=path, version=new_version, diff=diff,
-                              summary=summary,
-                              vector=get_embedding(summary),
-                              file_hash=current_hash, change_type="modified")
+            save_file_version(
+                path=path, version=new_version, diff=diff,
+                summary=summary,
+                vector=get_embedding(summary),
+                file_hash=current_hash, change_type="modified",
+            )
             send_diff(path=path, old_text=old_text, new_text=text)
 
     finally:
@@ -179,6 +206,7 @@ def index_file(path: str, from_scan: bool = False):
 
 
 def _handle_file_delete(path: str):
+    """Remove a deleted file's chunks from the index and record a deletion version."""
     state = load_state()
     info = state.get(path)
     if not info:
@@ -188,21 +216,24 @@ def _handle_file_delete(path: str):
     if chunk_ids:
         delete_chunks(chunk_ids)
 
-    # record deleted version
     save_file_version(
-        path=path, version=info.get("version", 0) + 1,
-        diff=["(file deleted)"], summary="File deleted",
+        path=path,
+        version=info.get("version", 0) + 1,
+        diff=["(file deleted)"],
+        summary="File deleted",
         vector=get_embedding("File deleted"),
-        file_hash=info.get("hash", ""), change_type="deleted",
+        file_hash=info.get("hash", ""),
+        change_type="deleted",
     )
 
     state.pop(path, None)
     save_state(state)
     send_file_change(path, "deleted")
-    print(f"Deleted: {path}", flush=True)
+    print(f"[DEL] {path}", flush=True)
 
 
 def _finalize_delete(path: str):
+    """Called after DELETE_DELAY; only proceeds if the file truly no longer exists."""
     if os.path.exists(path):
         return
     _handle_file_delete(path)
@@ -210,13 +241,15 @@ def _finalize_delete(path: str):
 
 
 def _delayed_index(path: str, delay: float = 0.3):
+    """Index a file after a short delay to let write operations complete."""
     def _run():
         if os.path.exists(path):
             index_file(path)
     threading.Timer(delay, _run).start()
 
 
-# ── file system event handler ─────────────────────────────────────────────────
+# ── watchdog event handler ────────────────────────────────────────────────────
+
 class FileChangeHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory or is_temp_file(event.src_path):
@@ -236,12 +269,14 @@ class FileChangeHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         path = event.src_path
+        # Debounce: wait DELETE_DELAY before treating this as a real delete
         timer = threading.Timer(DELETE_DELAY, lambda: _finalize_delete(path))
         _pending_deletes[path] = timer
         timer.start()
 
 
-# ── watchdog management ───────────────────────────────────────────────────────
+# ── watchdog lifecycle ────────────────────────────────────────────────────────
+
 _observer: Observer | None = None
 _current_paths: set[str] = set()
 _observer_lock = threading.Lock()
@@ -249,7 +284,12 @@ _handler = FileChangeHandler()
 
 
 def _initial_scan(path: str):
-    print("Initial scan:", path, flush=True)
+    """
+    Walk *path* and index any new or changed files.
+    After the scan, detect files that existed in the local state but are
+    no longer on disk (deleted while the indexer was offline).
+    """
+    print("[SCAN] Starting:", path, flush=True)
     state_before = {k: v for k, v in load_state().items() if k.startswith(path)}
 
     with SCANNING_LOCK:
@@ -263,14 +303,15 @@ def _initial_scan(path: str):
             SCANNING_PATHS.discard(path)
 
     state_after = load_state()
-
-    # handle files deleted while indexer was offline
     deleted = set(state_before.keys()) - set(state_after.keys())
     for p in deleted:
         _handle_file_delete(p)
 
+    print("[SCAN] Done:", path, flush=True)
+
 
 def _restart_watchdog(new_paths: set[str]):
+    """Stop any running observer and start a fresh one for *new_paths*."""
     global _observer, _current_paths
     added = new_paths - _current_paths
 
@@ -284,13 +325,15 @@ def _restart_watchdog(new_paths: set[str]):
         _observer.start()
         _current_paths = new_paths
 
+    # Run initial scans for newly added paths in background threads
     for p in added:
         threading.Thread(target=_initial_scan, args=(p,), daemon=True).start()
 
-    print("Watchdog restarted:", new_paths, flush=True)
+    print("[WATCHDOG] Restarted for paths:", new_paths, flush=True)
 
 
 def _watch_path_poller(interval: int = 5):
+    """Poll the server for the current watch-path list and restart if changed."""
     global _current_paths
     while True:
         try:
@@ -298,22 +341,23 @@ def _watch_path_poller(interval: int = 5):
             if paths != _current_paths:
                 _restart_watchdog(paths)
         except Exception as e:
-            print("Watch path fetch failed:", e, flush=True)
+            print("[POLL] Watch-path fetch failed:", e, flush=True)
         time.sleep(interval)
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     ensure_state_file()
     wait_for_server()
 
-    # initial scan of already-configured paths
+    # Kick off initial scans for already-configured paths
     threading.Thread(target=lambda: [
         threading.Thread(target=_initial_scan, args=(p,), daemon=True).start()
         for p in fetch_watch_paths()
     ], daemon=True).start()
 
-    # poll for watch path changes
+    # Continuously poll for watch-path changes
     threading.Thread(target=_watch_path_poller, daemon=True).start()
 
     try:

@@ -3,6 +3,7 @@ import FileTree from "./FileTree.tsx";
 import {useState} from "react";
 import {VersionTimeline} from "./VersionTimeline.tsx";
 import WatchPathSettings from "./WatchPathSettings.tsx";
+import SearchBar from "./SearchBar.tsx";
 import {Divider} from "antd";
 
 export default function FileExplorer() {
@@ -12,13 +13,18 @@ export default function FileExplorer() {
     return (
         <div style={{ display: "flex", height: "100vh" }}>
             {/* 좌측 트리 */}
-            <div style={{ width: '30vw', borderRight: "1px solid #ddd" }}>
+            <div style={{ width: '30vw', borderRight: "1px solid #ddd", padding: '8px 12px', overflowY: 'auto' }}>
                 <WatchPathSettings />
+                <Divider />
+                <SearchBar onSelectFile={(path) => {
+                    setSelectedPath(path);
+                    setSelectedVersion(null);
+                }} />
                 <Divider />
                 <FileTree
                     onSelectFile={(path) => {
                         setSelectedPath(path);
-                        setSelectedVersion(null); // 파일 바뀌면 버전 초기화
+                        setSelectedVersion(null);
                     }}
                 />
             </div>

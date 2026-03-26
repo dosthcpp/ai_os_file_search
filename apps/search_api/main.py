@@ -1,7 +1,14 @@
 """
 AI OS — Search API
-ChromaDB 기반 자연어 검색 + 파일 인덱싱 게이트웨이
+
+FastAPI server that provides:
+  - Natural-language semantic search over indexed file chunks (ChromaDB)
+  - File change tracking and version history
+  - WebSocket broadcasts for real-time file-tree updates
+  - Watch-path management persisted to config/settings.json
 """
+from __future__ import annotations
+
 import asyncio
 import json
 import os
@@ -10,7 +17,7 @@ from contextlib import asynccontextmanager
 from enum import Enum
 from pathlib import Path
 from time import time as now
-from typing import List
+from typing import List, Optional
 from uuid import uuid4
 
 import chromadb
@@ -28,26 +35,34 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 SETTINGS_FILE = ROOT_DIR / "config" / "settings.json"
 CHROMA_PATH = str(ROOT_DIR / "data" / "chroma")
 
-# ── settings (watch_paths 영속 저장) ─────────────────────────────────────────
+# Add packages/core to path so we can import the shared embedder
+sys.path.insert(0, str(ROOT_DIR / "packages" / "core"))
+from embedder import get_embedding as _openai_embed, EMBEDDING_DIM  # noqa: E402
+
+# ── settings (persisted to disk) ──────────────────────────────────────────────
 
 def load_settings() -> dict:
+    """Load settings from JSON file; return defaults if file is missing."""
     if SETTINGS_FILE.exists():
         return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     return {"watch_paths": [], "max_file_size_mb": 2, "server_url": "http://127.0.0.1:8000"}
 
 
 def save_settings(settings: dict):
+    """Persist settings dict to JSON file, creating parent dirs if needed."""
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(
         json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
-# ── ChromaDB ──────────────────────────────────────────────────────────────────
 
-_chroma: chromadb.PersistentClient | None = None
+# ── ChromaDB (local persistent) ───────────────────────────────────────────────
+
+_chroma: Optional[chromadb.PersistentClient] = None
 
 
 def get_chroma() -> chromadb.PersistentClient:
+    """Return the singleton ChromaDB persistent client."""
     global _chroma
     if _chroma is None:
         os.makedirs(CHROMA_PATH, exist_ok=True)
@@ -64,7 +79,7 @@ def _col_versions():
 
 
 def _col_changes():
-    # 메타데이터 필터링만 사용 — 의미 검색 없음
+    # Metadata-filtered lookups only — no semantic search on this collection
     return get_chroma().get_or_create_collection("file_changes")
 
 
@@ -72,25 +87,14 @@ def _col_diffs():
     return get_chroma().get_or_create_collection("file_diffs", metadata={"hnsw:space": "cosine"})
 
 
-# ── embedding (lazy) ──────────────────────────────────────────────────────────
-_embed_model = None
-
-
-def get_embed_model():
-    global _embed_model
-    if _embed_model is None:
-        from sentence_transformers import SentenceTransformer
-        print("[LOAD] Loading embedding model...", flush=True)
-        _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-        print("[OK] Embedding model loaded", flush=True)
-    return _embed_model
-
+# ── embedding (lazy, backed by OpenAI) ────────────────────────────────────────
 
 def _embed(text: str) -> list[float]:
-    return get_embed_model().encode(text).tolist()
+    """Return the OpenAI embedding vector for *text*."""
+    return _openai_embed(text)
 
 
-# ── WebSocket ─────────────────────────────────────────────────────────────────
+# ── WebSocket connection manager ──────────────────────────────────────────────
 
 class ConnectionManager:
     def __init__(self):
@@ -119,9 +123,10 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# ── tree builder ──────────────────────────────────────────────────────────────
+# ── file-tree helpers ─────────────────────────────────────────────────────────
 
 def _build_tree(file_metas: list[dict]) -> dict:
+    """Convert a flat list of file metadata dicts into a nested directory tree."""
     root: dict = {}
     for meta in file_metas:
         path = meta["path"]
@@ -142,6 +147,7 @@ def _build_tree(file_metas: list[dict]) -> dict:
 
 
 def _latest_file_changes() -> list[dict]:
+    """Return the most-recent change record for each tracked file path."""
     result = _col_changes().get(include=["metadatas"])
     latest: dict[str, dict] = {}
     for meta in (result["metadatas"] or []):
@@ -152,7 +158,7 @@ def _latest_file_changes() -> list[dict]:
     return list(latest.values())
 
 
-async def _notify_file_change(action: str, path: str, node: dict | None = None):
+async def _notify_file_change(action: str, path: str, node: Optional[dict] = None):
     await manager.broadcast({"type": "file-changed", "action": action, "path": path, "node": node})
 
 
@@ -166,11 +172,9 @@ async def _notify_tree_update():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[START] AI OS Search API starting...", flush=True)
-    # ChromaDB 컬렉션 초기화
+    # Ensure all collections exist before serving requests
     _col_files(); _col_versions(); _col_changes(); _col_diffs()
     print("[OK] ChromaDB collections ready", flush=True)
-    # 임베딩 모델 백그라운드 로드
-    asyncio.create_task(asyncio.to_thread(get_embed_model))
     print("[READY] Server ready", flush=True)
     yield
     print("[STOP] Server shutting down", flush=True)
@@ -195,7 +199,7 @@ class FileChangePayload(BaseModel):
     path: str
     status: FileStatus
     timestamp: float
-    node: dict | None = None
+    node: Optional[dict] = None
 
 
 class FileVersionData(BaseModel):
@@ -224,14 +228,14 @@ class PathData(BaseModel):
     path: str
 
 
-# ── 상태 확인 ─────────────────────────────────────────────────────────────────
+# ── health check ──────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "embed_model_loaded": _embed_model is not None}
+    return {"status": "ok", "embed_model_loaded": True}
 
 
-# ── 감시 경로 (영속 저장) ──────────────────────────────────────────────────────
+# ── watch-path management (persisted) ─────────────────────────────────────────
 
 @app.get("/api/watch-paths")
 def get_watch_paths():
@@ -242,7 +246,7 @@ def get_watch_paths():
 def add_watch_path(data: PathData):
     p = Path(data.path)
     if not p.is_dir():
-        return {"ok": False, "error": "존재하지 않는 디렉토리입니다"}
+        return {"ok": False, "error": "Directory does not exist"}
     settings = load_settings()
     if data.path not in settings.setdefault("watch_paths", []):
         settings["watch_paths"].append(data.path)
@@ -258,10 +262,11 @@ def remove_watch_path(data: PathData):
     return {"ok": True}
 
 
-# ── 청크 업서트 / 삭제 ────────────────────────────────────────────────────────
+# ── chunk upsert / delete ─────────────────────────────────────────────────────
 
 @app.post("/api/chunks/upsert")
 def upsert_chunk(data: ChunkData):
+    # Only scalar metadata types are supported by ChromaDB
     safe_meta = {k: v for k, v in data.payload.items() if isinstance(v, (str, int, float, bool))}
     doc = data.payload.get("text") or data.payload.get("path", "")
     _col_files().upsert(
@@ -279,17 +284,17 @@ def delete_chunks(ids: List[str]):
     return {"deleted": len(ids)}
 
 
-# ── 자연어 검색 ───────────────────────────────────────────────────────────────
+# ── semantic search ───────────────────────────────────────────────────────────
 
 @app.get("/api/search")
 def search(
-    q: str = Query(..., description="자연어 검색어"),
-    n: int = Query(5, ge=1, le=50, description="결과 개수"),
-    collection: str = Query("files", description="검색 대상 컬렉션"),
+    q: str = Query(..., description="Natural-language search query"),
+    n: int = Query(5, ge=1, le=50, description="Number of results to return"),
+    collection: str = Query("files", description="Collection to search: files | file_versions | file_diffs"),
 ):
     """
-    자연어 쿼리를 벡터로 변환해 ChromaDB에서 의미 기반 검색합니다.
-    collection: files | file_versions | file_diffs
+    Embed *q* with OpenAI and run a cosine-similarity query against the
+    specified ChromaDB collection.
     """
     col_map = {"files": _col_files, "file_versions": _col_versions, "file_diffs": _col_diffs}
     col_fn = col_map.get(collection, _col_files)
@@ -317,13 +322,13 @@ def search(
     ]
 
 
-# ── diff 저장 / 조회 ──────────────────────────────────────────────────────────
+# ── diff storage ──────────────────────────────────────────────────────────────
 
 @app.post("/api/diff")
 def save_diff(payload: DiffPayload):
     combined = payload.old_text + "\n" + payload.new_text
     vector = _embed(combined[:2000])
-    # path를 ID로 사용 → 파일당 최신 diff만 유지
+    # Use file path as the document ID so only the latest diff is kept per file
     _col_diffs().upsert(
         ids=[payload.path],
         embeddings=[vector],
@@ -352,13 +357,14 @@ def get_diff(path: str):
     }
 
 
-# ── 파일 변경 이벤트 ──────────────────────────────────────────────────────────
+# ── file change events ────────────────────────────────────────────────────────
 
 @app.post("/api/file-change")
 async def record_file_change(payload: FileChangePayload):
+    # Store a zero-vector placeholder — this collection is queried by metadata only
     _col_changes().add(
         ids=[str(uuid4())],
-        embeddings=[[0.0] * 384],
+        embeddings=[[0.0] * EMBEDDING_DIM],
         metadatas=[{
             "path": payload.path,
             "status": payload.status.value,
@@ -382,7 +388,7 @@ def get_changed_files_tree():
     return _build_tree(_latest_file_changes())
 
 
-# ── 버전 저장 / 조회 ──────────────────────────────────────────────────────────
+# ── file version storage ──────────────────────────────────────────────────────
 
 @app.post("/api/save-file-version")
 def save_file_version(data: FileVersionData):
@@ -405,6 +411,7 @@ def save_file_version(data: FileVersionData):
 
 @app.get("/api/files")
 def list_files():
+    """Return the latest version metadata for every tracked file."""
     result = _col_versions().get(include=["metadatas"])
     latest: dict[str, dict] = {}
     for meta in (result["metadatas"] or []):
@@ -448,7 +455,7 @@ def get_version_diff(path: str, version: int):
     return {"diff": json.loads(diff_raw)}
 
 
-# ── WebSocket ─────────────────────────────────────────────────────────────────
+# ── WebSocket: live file-tree ─────────────────────────────────────────────────
 
 @app.websocket("/ws/file-tree")
 async def websocket_file_tree(websocket: WebSocket):

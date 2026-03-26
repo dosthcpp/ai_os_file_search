@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from PyPDF2 import PdfReader
 from docx import Document

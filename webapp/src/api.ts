@@ -45,7 +45,18 @@ export async function getVersionDiff(path: string, version: number) {
     return res.data;
 }
 
-// export async function removeWatchPath(path: string) {
-//     const res = await axios.delete('/api/watch-path', { path });
-//     return res.data;
-// }
+export async function removeWatchPath(path: string) {
+    const res = await api.delete('/api/watch-path', { data: { path } });
+    return res.data;
+}
+
+export async function searchFiles(query: string, n = 5) {
+    const res = await api.get('/api/search', { params: { q: query, n } });
+    return res.data as Array<{
+        score: number;
+        path: string | null;
+        text: string;
+        chunk_index: number | null;
+        collection: string;
+    }>;
+}

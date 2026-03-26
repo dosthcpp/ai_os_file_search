@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getWatchPaths, addWatchPath } from '../api.ts';
+import { getWatchPaths, addWatchPath, removeWatchPath } from '../api.ts';
 
 export default function WatchPathSettings() {
     const [paths, setPaths] = useState<string[]>([]);
@@ -38,17 +38,10 @@ export default function WatchPathSettings() {
     //     }
     // };
 
-    // const onRemove = async (path: string) => {
-    //     if (!newPath.trim()) return;
-    //     if (paths.includes(newPath)) {
-    //         alert('이미 등록된 경로입니다');
-    //         return;
-    //     }
-    //
-    //     await addWatchPath(newPath.trim());
-    //     setNewPath('');
-    //     load().then();
-    // };
+    const onRemove = async (path: string) => {
+        await removeWatchPath(path);
+        load().then();
+    };
 
     useEffect(() => {
         load().then();
@@ -78,11 +71,12 @@ export default function WatchPathSettings() {
                 </div>
             </div>
 
-            <ul style={{
-                margin: 0
-            }}>
+            <ul style={{ margin: 0, listStyle: 'none', padding: 0 }}>
                 {paths.map(p => (
-                    <li key={p}>{p}</li>
+                    <li key={p} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+                        <span>{p}</span>
+                        <button onClick={() => onRemove(p)} style={{ fontSize: 12 }}>삭제</button>
+                    </li>
                 ))}
             </ul>
         </div>
