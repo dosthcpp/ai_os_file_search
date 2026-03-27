@@ -1,10 +1,10 @@
 import DiffViewer from "./DiffViewer.tsx";
 import FileTree from "./FileTree.tsx";
-import {useState} from "react";
-import {VersionTimeline} from "./VersionTimeline.tsx";
+import { useState } from "react";
+import { VersionTimeline } from "./VersionTimeline.tsx";
 import WatchPathSettings from "./WatchPathSettings.tsx";
-import SearchBar from "./SearchBar.tsx";
-import {Divider} from "antd";
+import SearchPanel from "./SearchPanel.tsx";
+import { Divider } from "antd";
 
 export default function FileExplorer() {
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -12,24 +12,24 @@ export default function FileExplorer() {
 
     return (
         <div style={{ display: "flex", height: "100vh" }}>
-            {/* 좌측 트리 */}
-            <div style={{ width: '30vw', borderRight: "1px solid #ddd", padding: '8px 12px', overflowY: 'auto' }}>
+            {/* Left panel: settings, search, and file tree */}
+            <div style={{ width: '30vw', borderRight: "1px solid #ddd", padding: '8px', overflowY: 'auto' }}>
                 <WatchPathSettings />
-                <Divider />
-                <SearchBar onSelectFile={(path) => {
+                <Divider style={{ margin: '8px 0' }} />
+                <SearchPanel onSelectFile={(path) => {
                     setSelectedPath(path);
                     setSelectedVersion(null);
                 }} />
-                <Divider />
+                <Divider style={{ margin: '8px 0' }} />
                 <FileTree
                     onSelectFile={(path) => {
                         setSelectedPath(path);
-                        setSelectedVersion(null);
+                        setSelectedVersion(null); // reset version when file changes
                     }}
                 />
             </div>
 
-            {/* 우측 패널 */}
+            {/* Right panel: version timeline and diff viewer */}
             <div style={{ flex: 1, padding: 16 }}>
                 {selectedPath && (
                     <>

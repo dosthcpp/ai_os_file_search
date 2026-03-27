@@ -50,13 +50,19 @@ export async function removeWatchPath(path: string) {
     return res.data;
 }
 
-export async function searchFiles(query: string, n = 5) {
-    const res = await api.get('/api/search', { params: { q: query, n } });
-    return res.data as Array<{
-        score: number;
-        path: string | null;
-        text: string;
-        chunk_index: number | null;
-        collection: string;
-    }>;
+export interface SearchResult {
+    score: number;
+    path: string;
+    text: string;
+    chunk_index: number | null;
+    collection: string;
+}
+
+export async function searchFiles(
+    query: string,
+    n = 5,
+    collection = 'files',
+): Promise<SearchResult[]> {
+    const res = await api.get('/api/search', { params: { q: query, n, collection } });
+    return res.data as SearchResult[];
 }
