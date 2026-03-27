@@ -1,90 +1,71 @@
-# AI OS File Search
+# AI OS
 
-Semantic file search for your local machine.
-Files are monitored in real time, chunked, embedded with **OpenAI**, stored in a local **ChromaDB** database, and made searchable through a **FastAPI** REST API with a **React** frontend.
+A local file-monitoring and semantic-search system.
+Watch directories are tracked in real time; file contents are chunked, embedded via OpenAI, and stored in a local ChromaDB instance.
+A React web UI lets you browse the file tree, inspect version history, view diffs, and run natural-language searches.
 
 ---
 
 ## Architecture
 
 ```
-webapp/          React + TypeScript UI (Vite)
-apps/search_api/ FastAPI server — ChromaDB + OpenAI embeddings
-packages/core/   Shared embedder (openai) and ChromaDB client
-packages/file-indexer/  File watcher daemon (watchdog)
-config/          settings.json — watch paths, server URL, file size limit
-data/chroma/     Local ChromaDB persistent storage (created at runtime)
-tests/           Pytest test suite (TDD)
+[Watched directories]
+        │  watchdog events
+        ▼
+  indexer/main.py          ← Python 3.11+, watchdog
+  (chunk → embed → upload)
+        │  HTTP (REST)
+        ▼
+  apps/search_api/main.py  ← FastAPI + ChromaDB (local, persistent)
+        │  HTTP / WebSocket
+        ▼
+  webapp/                  ← React 19 + TypeScript + Antd
 ```
 
 ---
 
-## Prerequisites
+## Requirements
 
-- Python 3.9+
-- Node.js 18+ / npm or yarn
-- An **OpenAI API key** (`OPENAI_API_KEY` environment variable)
+| Tool | Version |
+|------|---------|
+| Python | 3.11+ |
+| Node.js | 18+ |
+| OpenAI API key | `OPENAI_API_KEY` env var |
 
 ---
 
-## Quick Start
-
-### 1. Clone and set up Python environment
+## Setup
 
 ```bash
+# 1. Create and activate a Python virtual environment
 python3 -m venv .venv
-source .venv/bin/activate          # macOS / Linux
-# .venv\Scripts\activate           # Windows
-```
+source .venv/bin/activate      # macOS/Linux
+# .venv\Scripts\activate       # Windows
 
-### 2. Install Python dependencies
-
-```bash
-# API server + shared packages
+# 2. Install Python dependencies
 pip install -r apps/search_api/requirements.txt
-pip install -r packages/core/requirements.txt
+pip install -r indexer/requirements.txt
 
-# File indexer daemon
-pip install -r packages/file-indexer/requirements.txt
-```
+# 3. Install JS dependencies
+cd webapp && yarn && cd ..
 
-### 3. Install frontend dependencies
-
-```bash
-cd webapp && npm install && cd ..
-```
-
-### 4. Set your OpenAI API key
-
-```bash
+# 4. Set your OpenAI API key
 export OPENAI_API_KEY="sk-..."
+
+# 5. Start everything
+npm run dev
 ```
 
-### 5. Start all services (via npm scripts)
-
-```bash
-npm install           # install concurrently
-npm run dev           # starts API + indexer + webapp in parallel
-```
-
-Or start each service individually:
-
-```bash
-# API server (port 8000)
-uvicorn apps.search_api.main:app --reload --port 8000
-
-# File indexer daemon (in packages/file-indexer/)
-cd packages/file-indexer && python main.py
-
-# Frontend dev server
-cd webapp && npm run dev
-```
+`npm run dev` concurrently starts:
+- **Search API** — `uvicorn apps.search_api.main:app --reload --port 8000`
+- **Indexer** — `python indexer/main.py`
+- **Webapp** — Vite dev server (default port 5173)
 
 ---
 
 ## Configuration
 
-`config/settings.json` is auto-created on first run with defaults:
+`config/settings.json` is written automatically by the server.
 
 ```json
 {
@@ -94,73 +75,42 @@ cd webapp && npm run dev
 }
 ```
 
-Use the **Watch Path Settings** panel in the UI (or `POST /api/watch-path`) to add directories to monitor.
+Add watch directories via the web UI or `POST /api/watch-path`.
 
 ---
 
-## API Reference
+## Embedding model
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/health` | Server health check |
-| `GET` | `/api/watch-paths` | List configured watch paths |
-| `POST` | `/api/watch-path` | Add a watch path `{"path": "/..."}` |
-| `DELETE` | `/api/watch-path` | Remove a watch path |
-| `GET` | `/api/search?q=...&n=5` | Semantic search (OpenAI embedding) |
-| `POST` | `/api/chunks/upsert` | Index a text chunk with its vector |
-| `POST` | `/api/delete` | Delete chunk IDs from the index |
-| `POST` | `/api/diff` | Store a file diff |
-| `GET` | `/api/diff?path=...` | Retrieve the latest diff for a file |
-| `POST` | `/api/file-change` | Record a file add/modify/delete event |
-| `GET` | `/api/changed-files` | List all tracked file change events |
-| `GET` | `/api/changed-files/tree` | File-tree view of latest changes |
-| `POST` | `/api/save-file-version` | Store a versioned snapshot |
-| `GET` | `/api/files` | List the latest version of every tracked file |
-| `GET` | `/api/files/versions?path=...` | Version history for a file |
-| `GET` | `/api/files/version/diff?path=...&version=N` | Diff for a specific version |
-| `WS` | `/ws/file-tree` | Live file-tree updates via WebSocket |
+| | Before | After (current) |
+|--|--------|-----------------|
+| Provider | sentence-transformers (local) | OpenAI API |
+| Model | all-MiniLM-L6-v2 | text-embedding-3-small |
+| Dimension | 384 | 1536 |
+
+> **Note:** switching models requires clearing the ChromaDB data directory (`data/chroma/`) because the vector dimensions are different.
 
 ---
 
-## Embedding Details
+## Key API endpoints
 
-| Setting | Value |
-|---------|-------|
-| Provider | OpenAI |
-| Model | `text-embedding-3-small` |
-| Dimensions | 1536 |
-| Distance metric | Cosine similarity |
-
-To switch models, change `EMBEDDING_MODEL` and `EMBEDDING_DIM` in `packages/core/embedder.py`.
-**Note:** changing these constants requires wiping the existing ChromaDB data (`data/chroma/`) because stored vectors will have a different dimension.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Server status + model info |
+| GET | `/api/watch-paths` | List watch paths |
+| POST | `/api/watch-path` | Add a watch path |
+| DELETE | `/api/watch-path` | Remove a watch path |
+| GET | `/api/search?q=...` | Semantic search |
+| GET | `/api/changed-files/tree` | File tree JSON |
+| GET | `/api/files/versions?path=...` | Version history |
+| GET | `/api/files/version/diff?path=...&version=N` | Version diff |
+| WS | `/ws/file-tree` | Real-time tree updates |
 
 ---
 
-## Running Tests
+## Data storage
 
-```bash
-pip install -r tests/requirements.txt
-pytest tests/ -v
-```
-
-Test coverage:
-
-| File | Tests |
+| What | Where |
 |------|-------|
-| `test_chunker.py` | Text chunking logic |
-| `test_text_extractor.py` | Multi-format text extraction |
-| `test_utils.py` | State management, diff, UUID helpers |
-| `test_embedder.py` | OpenAI embedding module (mocked) |
-| `test_search_api.py` | FastAPI endpoint integration (mocked) |
-
----
-
-## Docker (optional ChromaDB server)
-
-A `docker-compose.yml` is provided if you prefer a standalone ChromaDB server instead of the embedded client:
-
-```bash
-docker compose up -d chroma
-```
-
-Update `apps/search_api/main.py` to use `chromadb.HttpClient` pointing at `localhost:8100`.
+| ChromaDB vectors | `data/chroma/` |
+| Settings | `config/settings.json` |
+| Indexer state | `.local_index_state.json` (project root) |
