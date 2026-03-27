@@ -1,11 +1,8 @@
 """
 AI OS — Search API
 
-FastAPI server that provides:
-  - Natural-language semantic search over indexed file chunks (ChromaDB)
-  - File change tracking and version history
-  - WebSocket broadcasts for real-time file-tree updates
-  - Watch-path management persisted to config/settings.json
+FastAPI gateway for ChromaDB-based semantic search and file indexing.
+Embeddings are generated via OpenAI text-embedding-3-small (1536 dims).
 """
 from __future__ import annotations
 
@@ -20,6 +17,8 @@ from time import time as now
 from typing import List, Optional
 from uuid import uuid4
 
+import openai
+
 import chromadb
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
@@ -31,15 +30,11 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8")
 
 # ── paths ─────────────────────────────────────────────────────────────────────
-ROOT_DIR = Path(__file__).resolve().parents[2]
+ROOT_DIR = Path(__file__).resolve().parents[2]  # workspace root
 SETTINGS_FILE = ROOT_DIR / "config" / "settings.json"
 CHROMA_PATH = str(ROOT_DIR / "data" / "chroma")
 
-# Add packages/core to path so we can import the shared embedder
-sys.path.insert(0, str(ROOT_DIR / "packages" / "core"))
-from embedder import get_embedding as _openai_embed, EMBEDDING_DIM  # noqa: E402
-
-# ── settings (persisted to disk) ──────────────────────────────────────────────
+# ── settings (persistent watch_paths) ────────────────────────────────────────
 
 def load_settings() -> dict:
     """Load settings from JSON file; return defaults if file is missing."""
@@ -79,7 +74,7 @@ def _col_versions():
 
 
 def _col_changes():
-    # Metadata-filtered lookups only — no semantic search on this collection
+    # Metadata-only queries — no semantic search on this collection
     return get_chroma().get_or_create_collection("file_changes")
 
 
@@ -87,11 +82,36 @@ def _col_diffs():
     return get_chroma().get_or_create_collection("file_diffs", metadata={"hnsw:space": "cosine"})
 
 
-# ── embedding (lazy, backed by OpenAI) ────────────────────────────────────────
+# ── embedding (OpenAI text-embedding-3-small) ─────────────────────────────────
+
+EMBED_MODEL = "text-embedding-3-small"
+EMBED_DIM = 1536  # dimension for text-embedding-3-small
+
+_openai_client: openai.OpenAI | None = None
+
+
+def _get_openai_client() -> openai.OpenAI:
+    """Return a lazily-created OpenAI client. Requires OPENAI_API_KEY env var."""
+    global _openai_client
+    if _openai_client is None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise EnvironmentError(
+                "OPENAI_API_KEY environment variable is not set. "
+                "Export it before starting the server."
+            )
+        _openai_client = openai.OpenAI(api_key=api_key)
+        print("[OK] OpenAI client initialised", flush=True)
+    return _openai_client
+
 
 def _embed(text: str) -> list[float]:
-    """Return the OpenAI embedding vector for *text*."""
-    return _openai_embed(text)
+    """Embed *text* with OpenAI and return a float list of length EMBED_DIM."""
+    text = text[:8000].replace("\n", " ")
+    response = _get_openai_client().embeddings.create(
+        input=[text], model=EMBED_MODEL
+    )
+    return response.data[0].embedding
 
 
 # ── WebSocket connection manager ──────────────────────────────────────────────
@@ -172,9 +192,14 @@ async def _notify_tree_update():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[START] AI OS Search API starting...", flush=True)
-    # Ensure all collections exist before serving requests
+    # Initialise ChromaDB collections on startup
     _col_files(); _col_versions(); _col_changes(); _col_diffs()
     print("[OK] ChromaDB collections ready", flush=True)
+    # Warm up the OpenAI client (validates API key early)
+    try:
+        _get_openai_client()
+    except EnvironmentError as e:
+        print(f"[WARN] {e}", flush=True)
     print("[READY] Server ready", flush=True)
     yield
     print("[STOP] Server shutting down", flush=True)
@@ -232,10 +257,15 @@ class PathData(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "embed_model_loaded": True}
+    return {
+        "status": "ok",
+        "embed_model": EMBED_MODEL,
+        "embed_dim": EMBED_DIM,
+        "openai_client_ready": _openai_client is not None,
+    }
 
 
-# ── watch-path management (persisted) ─────────────────────────────────────────
+# ── watch paths (persistent) ──────────────────────────────────────────────────
 
 @app.get("/api/watch-paths")
 def get_watch_paths():
@@ -293,8 +323,8 @@ def search(
     collection: str = Query("files", description="Collection to search: files | file_versions | file_diffs"),
 ):
     """
-    Embed *q* with OpenAI and run a cosine-similarity query against the
-    specified ChromaDB collection.
+    Convert a natural-language query to a vector and run semantic search in ChromaDB.
+    collection: files | file_versions | file_diffs
     """
     col_map = {"files": _col_files, "file_versions": _col_versions, "file_diffs": _col_diffs}
     col_fn = col_map.get(collection, _col_files)
@@ -322,13 +352,13 @@ def search(
     ]
 
 
-# ── diff storage ──────────────────────────────────────────────────────────────
+# ── diff save / retrieve ──────────────────────────────────────────────────────
 
 @app.post("/api/diff")
 def save_diff(payload: DiffPayload):
     combined = payload.old_text + "\n" + payload.new_text
     vector = _embed(combined[:2000])
-    # Use file path as the document ID so only the latest diff is kept per file
+    # Use path as ID so only the latest diff per file is stored
     _col_diffs().upsert(
         ids=[payload.path],
         embeddings=[vector],
@@ -364,7 +394,7 @@ async def record_file_change(payload: FileChangePayload):
     # Store a zero-vector placeholder — this collection is queried by metadata only
     _col_changes().add(
         ids=[str(uuid4())],
-        embeddings=[[0.0] * EMBEDDING_DIM],
+        embeddings=[[0.0] * EMBED_DIM],  # file_changes uses metadata-only queries
         metadatas=[{
             "path": payload.path,
             "status": payload.status.value,
@@ -388,7 +418,7 @@ def get_changed_files_tree():
     return _build_tree(_latest_file_changes())
 
 
-# ── file version storage ──────────────────────────────────────────────────────
+# ── version save / retrieve ───────────────────────────────────────────────────
 
 @app.post("/api/save-file-version")
 def save_file_version(data: FileVersionData):
