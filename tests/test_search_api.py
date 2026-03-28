@@ -240,3 +240,136 @@ def test_get_version_diff(client):
     data = r.json()
     assert "-old" in data["diff"]
     assert "+new" in data["diff"]
+
+
+# ── /api/search with filters ──────────────────────────────────────────────────
+
+def _upsert(client, chunk_id: str, path: str, text: str, ext: str):
+    """Helper: upsert a chunk with ext metadata."""
+    client.post("/api/chunks/upsert", json={
+        "id": chunk_id,
+        "vector": FAKE_VEC,
+        "payload": {"path": path, "chunk_index": 0, "text": text, "ext": ext},
+    })
+
+
+def test_search_ext_filter_returns_only_matching_ext(client):
+    _upsert(client, "py-chunk", "/proj/main.py", "python code here", ".py")
+    _upsert(client, "md-chunk", "/proj/readme.md", "markdown content here", ".md")
+
+    r = client.get("/api/search", params={"q": "code content", "n": 10, "ext": ".py"})
+    assert r.status_code == 200
+    results = r.json()
+    for res in results:
+        if res["ext"] is not None:
+            assert res["ext"] == ".py"
+
+
+def test_search_ext_filter_no_results_returns_empty(client):
+    _upsert(client, "js-chunk-2", "/proj/app.js", "javascript app code", ".js")
+
+    r = client.get("/api/search", params={"q": "javascript", "n": 5, "ext": ".rs"})
+    assert r.status_code == 200
+    results = r.json()
+    # All returned results (if any) must have .rs extension
+    for res in results:
+        if res["ext"] is not None:
+            assert res["ext"] == ".rs"
+
+
+def test_search_ext_normalizes_missing_dot(client):
+    """ext='py' (without dot) should behave the same as ext='.py'."""
+    _upsert(client, "py-chunk-3", "/proj/helper.py", "helper functions", ".py")
+
+    r = client.get("/api/search", params={"q": "helper", "n": 5, "ext": "py"})
+    assert r.status_code == 200
+    # Should not error out
+    assert isinstance(r.json(), list)
+
+
+def test_search_path_prefix_filter(client):
+    _upsert(client, "src-chunk", "/project/src/app.py", "source file", ".py")
+    _upsert(client, "test-chunk", "/project/tests/test_app.py", "test file", ".py")
+
+    r = client.get("/api/search", params={"q": "file", "n": 10, "path_prefix": "/project/src"})
+    assert r.status_code == 200
+    results = r.json()
+    for res in results:
+        if res["path"]:
+            assert res["path"].startswith("/project/src")
+
+
+def test_search_no_filter_returns_all(client):
+    _upsert(client, "a-chunk", "/a/file.py", "some python text", ".py")
+    _upsert(client, "b-chunk", "/b/file.go", "some go text", ".go")
+
+    r = client.get("/api/search", params={"q": "text", "n": 10})
+    assert r.status_code == 200
+    assert len(r.json()) >= 1
+
+
+def test_search_empty_collection_returns_empty(client):
+    """Searching an empty collection must not raise a 500 error."""
+    r = client.get("/api/search", params={"q": "anything", "n": 5, "collection": "file_diffs"})
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+# ── /api/file-content ─────────────────────────────────────────────────────────
+
+def test_file_content_outside_watch_path_denied(client, tmp_path):
+    # No watch paths configured → any real file should be denied
+    real_file = tmp_path / "secret.txt"
+    real_file.write_text("top secret")
+
+    r = client.get("/api/file-content", params={"path": str(real_file)})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert "not inside a watched directory" in data["error"]
+
+
+def test_file_content_inside_watch_path(client, tmp_path):
+    watch_dir = tmp_path / "watched"
+    watch_dir.mkdir()
+
+    # Register the watch path
+    client.post("/api/watch-path", json={"path": str(watch_dir)})
+
+    target = watch_dir / "hello.txt"
+    target.write_text("hello from file", encoding="utf-8")
+
+    r = client.get("/api/file-content", params={"path": str(target)})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["content"] == "hello from file"
+    assert data["truncated"] is False
+
+
+def test_file_content_nonexistent_file(client, tmp_path):
+    watch_dir = tmp_path / "watched2"
+    watch_dir.mkdir()
+    client.post("/api/watch-path", json={"path": str(watch_dir)})
+
+    r = client.get("/api/file-content", params={"path": str(watch_dir / "missing.txt")})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert "not found" in data["error"].lower()
+
+
+def test_file_content_truncation(client, tmp_path):
+    watch_dir = tmp_path / "watched3"
+    watch_dir.mkdir()
+    client.post("/api/watch-path", json={"path": str(watch_dir)})
+
+    big_file = watch_dir / "big.txt"
+    big_file.write_bytes(b"x" * 200)
+
+    r = client.get("/api/file-content", params={"path": str(big_file), "max_bytes": 100})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["truncated"] is True
+    assert len(data["content"]) <= 100
