@@ -163,6 +163,7 @@ def index_file(path: str, from_scan: bool = False):
         chunks = chunk_text(text)
         chunk_ids = []
 
+        ext = os.path.splitext(path)[1].lower()
         for i, chunk in enumerate(chunks):
             emb = get_embedding(chunk)
             chunk_id = chunk_id_to_uuid(f"{current_hash}_{i}")
@@ -170,7 +171,7 @@ def index_file(path: str, from_scan: bool = False):
             upload_chunk(
                 chunk_id=chunk_id,
                 vector=emb,
-                payload={"path": path, "chunk_index": i, "text": chunk[:300]},
+                payload={"path": path, "chunk_index": i, "text": chunk[:300], "ext": ext},
             )
 
         diff = compute_diff(old_text, text)

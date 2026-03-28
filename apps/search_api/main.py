@@ -321,35 +321,116 @@ def search(
     q: str = Query(..., description="Natural-language search query"),
     n: int = Query(5, ge=1, le=50, description="Number of results to return"),
     collection: str = Query("files", description="Collection to search: files | file_versions | file_diffs"),
+    ext: Optional[str] = Query(None, description="Filter by file extension, e.g. '.py' or 'py'"),
+    path_prefix: Optional[str] = Query(None, description="Filter results whose path starts with this prefix"),
 ):
     """
-    Convert a natural-language query to a vector and run semantic search in ChromaDB.
-    collection: files | file_versions | file_diffs
+    Embed *q* with OpenAI and run a cosine-similarity query against the
+    specified ChromaDB collection (files | file_versions | file_diffs).
+
+    Optional metadata filters:
+    - *ext*: restrict to files with a given extension (leading dot optional)
+    - *path_prefix*: restrict to files whose path begins with this string
     """
     col_map = {"files": _col_files, "file_versions": _col_versions, "file_diffs": _col_diffs}
     col_fn = col_map.get(collection, _col_files)
 
+    # Build ChromaDB where-filter
+    where: Optional[dict] = None
+    conditions: list[dict] = []
+    if ext:
+        normalized_ext = ext if ext.startswith(".") else f".{ext}"
+        conditions.append({"ext": {"$eq": normalized_ext}})
+    if path_prefix:
+        conditions.append({"path": {"$gte": path_prefix}})
+    if len(conditions) == 1:
+        where = conditions[0]
+    elif len(conditions) > 1:
+        where = {"$and": conditions}
+
     query_emb = _embed(q)
-    results = col_fn().query(
+
+    # Fetch a larger candidate set when filtering so we still return n results
+    fetch_n = min(n * 4, 50) if where else n
+    query_kwargs: dict = dict(
         query_embeddings=[query_emb],
-        n_results=n,
+        n_results=fetch_n,
         include=["metadatas", "documents", "distances"],
     )
+    if where:
+        query_kwargs["where"] = where
 
-    return [
-        {
+    try:
+        results = col_fn().query(**query_kwargs)
+    except Exception:
+        # ChromaDB raises when the collection is empty or filter yields 0 docs
+        return []
+
+    hits = []
+    for meta, doc, dist in zip(
+        results["metadatas"][0],
+        results["documents"][0],
+        results["distances"][0],
+    ):
+        file_path: str = meta.get("path", "")
+        # Post-filter path_prefix (ChromaDB $gte is lexicographic, not prefix)
+        if path_prefix and not file_path.startswith(path_prefix):
+            continue
+        hits.append({
             "score": round(1 - dist, 4),
-            "path": meta.get("path"),
+            "path": file_path or None,
             "text": (doc or "")[:500],
             "chunk_index": meta.get("chunk_index"),
             "collection": collection,
+            "ext": meta.get("ext"),
+        })
+        if len(hits) >= n:
+            break
+
+    return hits
+
+
+# ── file content preview ──────────────────────────────────────────────────────
+
+@app.get("/api/file-content")
+def get_file_content(
+    path: str,
+    max_bytes: int = Query(100_000, ge=1, le=1_000_000, description="Max bytes to return"),
+):
+    """
+    Return the raw text content of a file on disk.
+
+    Only paths that are under a configured watch directory are allowed.
+    """
+    settings = load_settings()
+    watch_paths: list[str] = settings.get("watch_paths", [])
+
+    p = Path(path).resolve()
+
+    # Security: only serve files within configured watch directories
+    allowed = any(str(p).startswith(wp) for wp in watch_paths)
+    if not allowed:
+        return {"ok": False, "error": "Path is not inside a watched directory", "content": ""}
+
+    if not p.is_file():
+        return {"ok": False, "error": "File not found", "content": ""}
+
+    try:
+        raw = p.read_bytes()
+        # Try UTF-8; fall back to latin-1 so we never crash on binary blobs
+        try:
+            content = raw[:max_bytes].decode("utf-8")
+        except UnicodeDecodeError:
+            content = raw[:max_bytes].decode("latin-1")
+        return {
+            "ok": True,
+            "path": str(p),
+            "size": p.stat().st_size,
+            "truncated": len(raw) > max_bytes,
+            "content": content,
         }
-        for meta, doc, dist in zip(
-            results["metadatas"][0],
-            results["documents"][0],
-            results["distances"][0],
-        )
-    ]
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "content": ""}
 
 
 # ── diff save / retrieve ──────────────────────────────────────────────────────
