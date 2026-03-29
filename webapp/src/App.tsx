@@ -1,9 +1,7 @@
-import FileExplorer from "./components/FileExplorer.tsx";
-// import {DiffViewer} from "./components/DiffViewer.tsx";
+import Desktop from "./components/Desktop.tsx";
 
 export default function App() {
     return (
-        <FileExplorer />
+        <Desktop />
     );
-
 }

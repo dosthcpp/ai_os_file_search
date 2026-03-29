@@ -125,6 +125,25 @@ Add watch directories via the web UI or `POST /api/watch-path`.
 - **Natural-language image search** — a new `/api/search/images` endpoint allows searching for images using descriptive text (e.g., "a photo of a cat") via the CLIP text tower.
 - **Independent modules** — CLIP and OCR logic are encapsulated in standalone packages for easy scaling.
 
+### Phase 5: Puter-style Web OS Interface
+- **Desktop Background**: Main workspace for all windows.
+- **Window Management**: Draggable, minimizable, maximizable, and closable windows using `react-draggable`.
+- **Taskbar/Dock**: At the bottom for app launching and window switching.
+- **Integrated Apps**:
+  - **File Explorer**: Browse the file tree.
+  - **Search**: Semantic file search.
+  - **Security Audit**: Real-time system security checks.
+  - **Settings**: Manage watch paths and system configuration.
+  - **File Viewer**: View file content and version history (with diffing) as separate windows.
+- **Real-time Sync**: Desktop remains updated via WebSocket connections to the backend.
+
+### Phase 4 (New)
+- **Security Audit (Secret Scanner)** — automatically scans every indexed file for potential secrets, credentials, and API keys.
+- **Pattern Matching** — identifies OpenAI keys, GitHub tokens, AWS keys, Slack webhooks, and private keys using regex.
+- **Security Metadata** — stores security findings (`has_secrets`, `secrets_count`, `secrets_types`) in ChromaDB for easy filtering.
+- **Security Dashboard API** — a new `/api/security/audit` endpoint lists all files containing potential leaks, enabling a "Security Audit" workflow.
+- **Privacy-First** — secrets are masked (e.g., `sk-abcd...1234`) before being stored in metadata to prevent internal data exposure.
+
 ---
 
 ## Embedding model
