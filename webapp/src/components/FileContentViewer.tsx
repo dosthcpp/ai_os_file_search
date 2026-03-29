@@ -7,7 +7,7 @@ type Props = {
 
 // Derive a language hint from file extension for basic header display
 function langFromPath(path: string): string {
-    const ext = path.split('.').pop()?.toLowerCase() ?? '';
+    const extension = path.includes('.') ? path.split('.').pop()?.toLowerCase() ?? '' : '';
     const map: Record<string, string> = {
         py: 'Python', js: 'JavaScript', ts: 'TypeScript',
         tsx: 'TypeScript/React', jsx: 'JavaScript/React',
@@ -17,7 +17,8 @@ function langFromPath(path: string): string {
         csv: 'CSV', md: 'Markdown', txt: 'Text', sh: 'Shell',
         pdf: 'PDF', docx: 'Word',
     };
-    return map[ext] ?? ext.toUpperCase() || 'File';
+    if (map[extension]) return map[extension];
+    return extension ? extension.toUpperCase() : 'File';
 }
 
 export default function FileContentViewer({ path }: Props) {

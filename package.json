@@ -3,12 +3,12 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -n api,indexer,web -c blue,green,magenta \"npm run api\" \"npm run indexer\" \"npm run web\"",
-    "api": "python -m uvicorn main:app --app-dir apps/search_api --reload --port 8000",
-    "indexer": "python -u packages/file-indexer/main.py",
-    "web": "cd webapp && yarn dev",
-    "install:api": "pip install -r apps/search_api/requirements.txt",
-    "install:indexer": "pip install -r packages/file-indexer/requirements.txt",
-    "install:web": "cd webapp && yarn install",
+    "api": "python3 -m uvicorn main:app --app-dir apps/search_api --reload --port 8000",
+    "indexer": "python3 -u packages/file-indexer/main.py",
+    "web": "cd webapp && npm run dev",
+    "install:api": "pip3 install -r apps/search_api/requirements.txt",
+    "install:indexer": "pip3 install -r packages/file-indexer/requirements.txt",
+    "install:web": "cd webapp && npm install",
     "install:all": "npm run install:api && npm run install:indexer && npm run install:web"
   },
   "devDependencies": {

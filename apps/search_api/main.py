@@ -676,6 +676,48 @@ def list_indexed_images():
     return [m["path"] for m in (result["metadatas"] or [])]
 
 
+# ── Phase 4: Security Audit ───────────────────────────────────────────────────
+
+@app.get("/api/security/audit")
+def security_audit():
+    """
+    Search for files that contain potential secrets.
+    Queries the 'files' collection for chunks where 'has_secrets' is True.
+    """
+    try:
+        # ChromaDB boolean filtering
+        results = _col_files().get(
+            where={"has_secrets": {"$eq": True}},
+            include=["metadatas", "documents"]
+        )
+    except Exception:
+        return {"ok": True, "results": []}
+
+    if not results["ids"]:
+        return {"ok": True, "results": []}
+
+    # Group results by file path to avoid redundant reports
+    unique_files = {}
+    for meta, doc in zip(results["metadatas"], results["documents"]):
+        path = meta.get("path")
+        if path not in unique_files:
+            unique_files[path] = {
+                "path": path,
+                "secrets_count": meta.get("secrets_count", 0),
+                "secrets_types": meta.get("secrets_types", ""),
+                # Sample of the text around the finding (the document itself)
+                "sample": (doc or "")[:200]
+            }
+        else:
+            # Update counts if multiple chunks in the same file have secrets
+            unique_files[path]["secrets_count"] = max(
+                unique_files[path]["secrets_count"],
+                meta.get("secrets_count", 0)
+            )
+
+    return {"ok": True, "results": list(unique_files.values())}
+
+
 # ── WebSocket: live file-tree ─────────────────────────────────────────────────
 
 @app.websocket("/ws/file-tree")

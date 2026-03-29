@@ -48,6 +48,7 @@ from client import (
 )
 from embedder import get_embedding  # noqa: E402 (core)
 from text_extractor import extract_text
+from secret_scanner import SecretScanner
 from utils import (
     chunk_id_to_uuid,
     compute_diff,
@@ -182,6 +183,9 @@ def index_file(path: str, from_scan: bool = False):
             send_file_change(path, "added" if is_new else "modified")
             return
 
+        # Phase 4: Secret Scanning (Security Audit)
+        security_meta = SecretScanner.get_summary_metadata(text)
+
         chunks = chunk_text(text)
         chunk_ids = []
 
@@ -190,10 +194,15 @@ def index_file(path: str, from_scan: bool = False):
             emb = get_embedding(chunk)
             chunk_id = chunk_id_to_uuid(f"{current_hash}_{i}")
             chunk_ids.append(chunk_id)
+            
+            # Combine basic payload with security metadata
+            payload = {"path": path, "chunk_index": i, "text": chunk[:300], "ext": ext}
+            payload.update(security_meta)
+            
             upload_chunk(
                 chunk_id=chunk_id,
                 vector=emb,
-                payload={"path": path, "chunk_index": i, "text": chunk[:300], "ext": ext},
+                payload=payload,
             )
 
         diff = compute_diff(old_text, text)
