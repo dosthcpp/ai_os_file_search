@@ -26,11 +26,12 @@ A React web UI lets you browse the file tree, inspect version history, view diff
 
 ## Requirements
 
-| Tool | Version |
-|------|---------|
-| Python | 3.9+ |
-| Node.js | 18+ |
-| OpenAI API key | `OPENAI_API_KEY` env var |
+| Tool | Version | Notes |
+|------|---------|-------|
+| Python | 3.11+ | 3.9 minimum, 3.11+ recommended |
+| Node.js | 18+ | |
+| OpenAI API key | `OPENAI_API_KEY` env var | |
+| Tesseract OCR | any | Optional — enables OCR for images. `brew install tesseract` (macOS) or `apt-get install tesseract-ocr` (Ubuntu) |
 
 ---
 
@@ -176,6 +177,8 @@ pytest tests/ -v
 | `test_utils.py` | State management, diff, UUID helpers |
 | `test_embedder.py` | OpenAI embedding module (mocked) |
 | `test_search_api.py` | FastAPI endpoints including search filters and file content |
+| `test_ocr_extractor.py` | OCR text extraction: `is_image()`, graceful fallback, mock OCR pipeline |
+| `test_clip_embedder.py` | CLIP embedder: constants, graceful fallback, mock model/processor pipeline |
 
 ---
 

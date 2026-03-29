@@ -32,13 +32,18 @@ CLIP_MODEL_NAME: str = "openai/clip-vit-base-patch32"
 # Embedding dimension for ViT-B/32 (must match the ChromaDB collection schema)
 CLIP_DIM: int = 512
 
-# Optional runtime imports — CLIP requires transformers, torch, and Pillow
+# Optional runtime imports — CLIP requires transformers, torch, and Pillow.
+# Always define module-level names so mock.patch can replace them in tests.
 try:
     import torch
     from PIL import Image
     from transformers import CLIPModel, CLIPProcessor
     _CLIP_AVAILABLE = True
 except ImportError:
+    torch = None        # type: ignore[assignment]
+    Image = None        # type: ignore[assignment]
+    CLIPModel = None    # type: ignore[assignment]
+    CLIPProcessor = None  # type: ignore[assignment]
     _CLIP_AVAILABLE = False
 
 # Lazy singletons — loaded once on first use

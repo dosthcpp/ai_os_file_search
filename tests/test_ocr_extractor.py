@@ -71,19 +71,18 @@ class TestExtractTextFromImage:
 
     def test_returns_extracted_text(self, tmp_path, monkeypatch):
         """When pytesseract returns text, it should be returned stripped."""
-        # Fake PIL Image and pytesseract modules
         fake_img = mock.MagicMock()
         fake_img.__enter__ = mock.MagicMock(return_value=fake_img)
         fake_img.__exit__ = mock.MagicMock(return_value=False)
         fake_img.convert.return_value = fake_img
 
+        # create=True allows patching even when PIL/pytesseract are not installed
         with mock.patch("ocr_extractor._OCR_AVAILABLE", True), \
-             mock.patch("ocr_extractor.Image") as mock_image, \
-             mock.patch("ocr_extractor.pytesseract") as mock_tess:
+             mock.patch("ocr_extractor.Image", create=True) as mock_image, \
+             mock.patch("ocr_extractor.pytesseract", create=True) as mock_tess:
             mock_image.open.return_value = fake_img
             mock_tess.image_to_string.return_value = "  Hello, World!  "
 
-            # Create a dummy file path (doesn't need to exist because Image.open is mocked)
             result = ocr_extractor.extract_text_from_image("/fake/image.png")
 
         assert result == "Hello, World!"
@@ -96,8 +95,8 @@ class TestExtractTextFromImage:
         fake_img.convert.return_value = fake_img
 
         with mock.patch("ocr_extractor._OCR_AVAILABLE", True), \
-             mock.patch("ocr_extractor.Image") as mock_image, \
-             mock.patch("ocr_extractor.pytesseract") as mock_tess:
+             mock.patch("ocr_extractor.Image", create=True) as mock_image, \
+             mock.patch("ocr_extractor.pytesseract", create=True) as mock_tess:
             mock_image.open.return_value = fake_img
             mock_tess.image_to_string.return_value = "   \n  "
 
@@ -108,7 +107,7 @@ class TestExtractTextFromImage:
     def test_returns_none_on_exception(self, monkeypatch):
         """Any exception during OCR must be swallowed and return None."""
         with mock.patch("ocr_extractor._OCR_AVAILABLE", True), \
-             mock.patch("ocr_extractor.Image") as mock_image:
+             mock.patch("ocr_extractor.Image", create=True) as mock_image:
             mock_image.open.side_effect = OSError("file not found")
 
             result = ocr_extractor.extract_text_from_image("/nonexistent.png")
@@ -124,8 +123,8 @@ class TestExtractTextFromImage:
         fake_img.convert.return_value = fake_rgb
 
         with mock.patch("ocr_extractor._OCR_AVAILABLE", True), \
-             mock.patch("ocr_extractor.Image") as mock_image, \
-             mock.patch("ocr_extractor.pytesseract") as mock_tess:
+             mock.patch("ocr_extractor.Image", create=True) as mock_image, \
+             mock.patch("ocr_extractor.pytesseract", create=True) as mock_tess:
             mock_image.open.return_value = fake_img
             mock_tess.image_to_string.return_value = "text"
 

@@ -40,7 +40,9 @@ ROOT_DIR = Path(__file__).resolve().parents[2]  # workspace root
 SETTINGS_FILE = ROOT_DIR / "config" / "settings.json"
 CHROMA_PATH = str(ROOT_DIR / "data" / "chroma")
 
-# ── Phase 3: CLIP embedder (shared with file-indexer via packages/core) ───────
+# ── Phase 3: CLIP embedder (packages/core — shared by indexer and API) ────────
+# clip_embedder.py encodes both image files (visual) and text queries into the
+# same 512-dim CLIP vector space so cross-modal image search works.
 sys.path.insert(0, str(ROOT_DIR / "packages" / "core"))
 from clip_embedder import CLIP_DIM, clip_available, get_text_embedding  # noqa: E402
 
@@ -92,16 +94,8 @@ def _col_diffs():
     return get_chroma().get_or_create_collection("file_diffs", metadata={"hnsw:space": "cosine"})
 
 
-def _col_images():
-    """Phase 3: 512-dim CLIP image embeddings, cosine similarity."""
-    return get_chroma().get_or_create_collection(
-        "images_clip",
-        metadata={"hnsw:space": "cosine"},
-    )
-
-
 def _col_images_clip():
-    # 512-dim CLIP visual embeddings — separate from the 1536-dim text collections
+    """Phase 3: 512-dim CLIP visual embeddings, separate from the 1536-dim text collections."""
     return get_chroma().get_or_create_collection("images_clip", metadata={"hnsw:space": "cosine"})
 
 
@@ -109,9 +103,7 @@ def _col_images_clip():
 
 EMBED_MODEL = "text-embedding-3-small"
 EMBED_DIM = 1536  # dimension for text-embedding-3-small
-
-# CLIP visual embedding dimension (ViT-B/32) — used by the images_clip collection
-CLIP_DIM = 512
+# CLIP_DIM is imported from packages/core/clip_embedder (512 for ViT-B/32)
 
 _openai_client: openai.OpenAI | None = None
 
@@ -218,8 +210,8 @@ async def _notify_tree_update():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[START] AI OS Search API starting...", flush=True)
-    # Initialise ChromaDB collections on startup (Phase 3: also images_clip)
-    _col_files(); _col_versions(); _col_changes(); _col_diffs(); _col_images(); _col_images_clip()
+    # Initialise ChromaDB collections on startup (Phase 3 adds images_clip)
+    _col_files(); _col_versions(); _col_changes(); _col_diffs(); _col_images_clip()
     print("[OK] ChromaDB collections ready", flush=True)
     # Warm up the OpenAI client (validates API key early)
     try:
@@ -649,17 +641,6 @@ def search_images(
     Requires: transformers + torch installed on the server.
     Returns an empty list when CLIP is unavailable or the collection is empty.
     """
-    # Import CLIP embedder lazily — only needed when this endpoint is called
-    try:
-        import sys
-        from pathlib import Path as _Path
-        _root = _Path(__file__).resolve().parents[2]
-        if str(_root / "packages" / "core") not in sys.path:
-            sys.path.insert(0, str(_root / "packages" / "core"))
-        from clip_embedder import get_text_embedding, clip_available
-    except ImportError:
-        return {"ok": False, "error": "CLIP module not available", "results": []}
-
     if not clip_available():
         return {"ok": False, "error": "CLIP dependencies (transformers/torch) not installed", "results": []}
 

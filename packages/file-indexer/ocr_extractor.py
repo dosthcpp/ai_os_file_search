@@ -19,12 +19,15 @@ IMAGE_EXTS: frozenset[str] = frozenset(
     {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".gif", ".webp"}
 )
 
-# Optional runtime dependencies — OCR requires both Pillow and pytesseract
+# Optional runtime dependencies — OCR requires both Pillow and pytesseract.
+# Always define module-level names so mock.patch can replace them in tests.
 try:
     from PIL import Image
     import pytesseract
     _OCR_AVAILABLE = True
 except ImportError:
+    Image = None        # type: ignore[assignment]
+    pytesseract = None  # type: ignore[assignment]
     _OCR_AVAILABLE = False
 
 

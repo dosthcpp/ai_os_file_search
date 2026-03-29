@@ -1,2 +1,6 @@
 chromadb>=0.5.0
 openai>=1.0.0
+# Phase 3: CLIP visual embeddings (ViT-B/32 via Hugging Face transformers)
+Pillow>=10.0.0
+transformers>=4.40.0
+torch>=2.0.0
