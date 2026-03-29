@@ -25,19 +25,28 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
+# ── add packages/core to sys.path so shared modules are importable ────────────
+ROOT_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT_DIR / "packages" / "core"))
+
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from chunker import chunk_text
+from clip_embedder import clip_available, get_image_embedding  # noqa: E402 (core)
+from ocr_extractor import extract_text_from_image, is_image
 from client import (
     delete_chunks,
+    delete_image_embedding,
     fetch_watch_paths,
     save_file_version,
     send_diff,
     send_file_change,
     upload_chunk,
+    upload_image_embedding,
     wait_for_server,
 )
+from embedder import get_embedding  # noqa: E402 (core)
 from text_extractor import extract_text
 from utils import (
     chunk_id_to_uuid,
@@ -48,11 +57,6 @@ from utils import (
     save_state,
     update_state,
 )
-
-# ── embedding (OpenAI, shared core module) ────────────────────────────────────
-ROOT_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT_DIR / "packages" / "core"))
-from embedder import get_embedding  # noqa: E402
 
 # ── config ────────────────────────────────────────────────────────────────────
 SETTINGS_FILE = ROOT_DIR / "config" / "settings.json"
@@ -156,8 +160,26 @@ def index_file(path: str, from_scan: bool = False):
             return
 
         old_text = prev_state.get("text", "") if prev_state else ""
-        text = extract_text(path)
+        prev_version = prev_state.get("version", 0) if prev_state else 0
+
+        # Phase 3: OCR text extraction for image files
+        if is_image(path):
+            text = extract_text_from_image(path)
+        else:
+            text = extract_text(path)
+
+        # Phase 3: CLIP visual embedding (stored in the separate images_clip collection)
+        if is_image(path) and clip_available():
+            image_emb = get_image_embedding(path)
+            if image_emb:
+                upload_image_embedding(path=path, image_vector=image_emb, file_hash=current_hash)
+
         if not text:
+            # Image with no OCR text (or unsupported file type): persist the hash
+            # so we skip re-processing on the next scan without losing CLIP data.
+            update_state(path=path, file_hash=current_hash, chunk_ids=[],
+                         stat=stat, text="", version=prev_version + 1)
+            send_file_change(path, "added" if is_new else "modified")
             return
 
         chunks = chunk_text(text)
@@ -175,7 +197,6 @@ def index_file(path: str, from_scan: bool = False):
             )
 
         diff = compute_diff(old_text, text)
-        prev_version = prev_state.get("version", 0) if prev_state else 0
         new_version = prev_version + 1
 
         update_state(path=path, file_hash=current_hash, chunk_ids=chunk_ids,
@@ -216,6 +237,10 @@ def _handle_file_delete(path: str):
     chunk_ids = info.get("chunks", [])
     if chunk_ids:
         delete_chunks(chunk_ids)
+
+    # Phase 3: CLIP image embedding deletion
+    if Path(path).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+        delete_image_embedding(path)
 
     save_file_version(
         path=path,

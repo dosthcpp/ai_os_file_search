@@ -90,3 +90,26 @@ def save_file_version(path: str, version: int, diff: list[str], summary: str,
         },
         timeout=5,
     )
+
+
+def upload_image_embedding(path: str, image_vector: list[float], file_hash: str):
+    """
+    Send a pre-computed CLIP image embedding to the search API.
+
+    The API stores it in the 'images_clip' ChromaDB collection so it can be
+    retrieved via GET /api/search/images.
+    """
+    requests.post(
+        f"{_server_url()}/api/images/index",
+        json={"path": path, "vector": image_vector, "hash": file_hash},
+        timeout=10,
+    ).raise_for_status()
+
+
+def delete_image_embedding(path: str):
+    """Remove a CLIP image embedding from the 'images_clip' collection."""
+    requests.delete(
+        f"{_server_url()}/api/images/index",
+        json={"path": path},
+        timeout=10,
+    )

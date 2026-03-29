@@ -82,10 +82,18 @@ def _col_diffs():
     return get_chroma().get_or_create_collection("file_diffs", metadata={"hnsw:space": "cosine"})
 
 
+def _col_images_clip():
+    # 512-dim CLIP visual embeddings — separate from the 1536-dim text collections
+    return get_chroma().get_or_create_collection("images_clip", metadata={"hnsw:space": "cosine"})
+
+
 # ── embedding (OpenAI text-embedding-3-small) ─────────────────────────────────
 
 EMBED_MODEL = "text-embedding-3-small"
 EMBED_DIM = 1536  # dimension for text-embedding-3-small
+
+# CLIP visual embedding dimension (ViT-B/32) — used by the images_clip collection
+CLIP_DIM = 512
 
 _openai_client: openai.OpenAI | None = None
 
@@ -193,7 +201,7 @@ async def _notify_tree_update():
 async def lifespan(app: FastAPI):
     print("[START] AI OS Search API starting...", flush=True)
     # Initialise ChromaDB collections on startup
-    _col_files(); _col_versions(); _col_changes(); _col_diffs()
+    _col_files(); _col_versions(); _col_changes(); _col_diffs(); _col_images_clip()
     print("[OK] ChromaDB collections ready", flush=True)
     # Warm up the OpenAI client (validates API key early)
     try:
@@ -251,6 +259,13 @@ class DiffPayload(BaseModel):
 
 class PathData(BaseModel):
     path: str
+
+
+class ImageIndexData(BaseModel):
+    """Payload sent by the file-indexer when it indexes a new image."""
+    path: str          # absolute path to the image file
+    vector: list[float]  # 512-dim CLIP embedding (must equal CLIP_DIM)
+    hash: str          # MD5 hex digest of the image file
 
 
 # ── health check ──────────────────────────────────────────────────────────────
@@ -564,6 +579,99 @@ def get_version_diff(path: str, version: int):
         return {"diff": []}
     diff_raw = result["metadatas"][0].get("diff", "[]")
     return {"diff": json.loads(diff_raw)}
+
+
+# ── Phase 3: CLIP image index + multimodal search ─────────────────────────────
+
+@app.post("/api/images/index")
+def index_image(data: ImageIndexData):
+    """
+    Store a pre-computed CLIP image embedding in the 'images_clip' collection.
+
+    Called by the file-indexer whenever a new or changed image is processed.
+    The path is used as the document ID so re-indexing the same file is
+    idempotent (upsert semantics).
+    """
+    if len(data.vector) != CLIP_DIM:
+        return {"ok": False, "error": f"Expected {CLIP_DIM}-dim vector, got {len(data.vector)}"}
+    _col_images_clip().upsert(
+        ids=[data.path],          # one record per image path
+        embeddings=[data.vector],
+        metadatas=[{"path": data.path, "hash": data.hash}],
+        documents=[data.path],
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/images/index")
+def delete_image(data: PathData):
+    """Remove a CLIP embedding from the 'images_clip' collection."""
+    try:
+        _col_images_clip().delete(ids=[data.path])
+    except Exception:
+        pass  # silently ignore missing entries
+    return {"ok": True}
+
+
+@app.get("/api/search/images")
+def search_images(
+    q: str = Query(..., description="Natural-language query for image search"),
+    n: int = Query(5, ge=1, le=50, description="Number of results to return"),
+):
+    """
+    Semantic image search using a CLIP text query.
+
+    The query *q* is encoded by the CLIP text tower on the server and compared
+    against stored CLIP visual embeddings in the 'images_clip' collection.
+    Results are ranked by cosine similarity.
+
+    Requires: transformers + torch installed on the server.
+    Returns an empty list when CLIP is unavailable or the collection is empty.
+    """
+    # Import CLIP embedder lazily — only needed when this endpoint is called
+    try:
+        import sys
+        from pathlib import Path as _Path
+        _root = _Path(__file__).resolve().parents[2]
+        if str(_root / "packages" / "file-indexer") not in sys.path:
+            sys.path.insert(0, str(_root / "packages" / "file-indexer"))
+        from clip_embedder import get_text_embedding, clip_available
+    except ImportError:
+        return {"ok": False, "error": "CLIP module not available", "results": []}
+
+    if not clip_available():
+        return {"ok": False, "error": "CLIP dependencies (transformers/torch) not installed", "results": []}
+
+    query_emb = get_text_embedding(q)
+    if query_emb is None:
+        return {"ok": False, "error": "Failed to encode query with CLIP", "results": []}
+
+    try:
+        results = _col_images_clip().query(
+            query_embeddings=[query_emb],
+            n_results=n,
+            include=["metadatas", "distances"],
+        )
+    except Exception:
+        # Collection is empty or HNSW index not yet built
+        return {"ok": True, "results": []}
+
+    hits = []
+    for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
+        hits.append({
+            "score": round(1 - dist, 4),
+            "path": meta.get("path"),
+            "hash": meta.get("hash"),
+            "collection": "images_clip",
+        })
+    return {"ok": True, "results": hits}
+
+
+@app.get("/api/images")
+def list_indexed_images():
+    """Return a list of all image paths currently stored in the CLIP index."""
+    result = _col_images_clip().get(include=["metadatas"])
+    return [m["path"] for m in (result["metadatas"] or [])]
 
 
 # ── WebSocket: live file-tree ─────────────────────────────────────────────────

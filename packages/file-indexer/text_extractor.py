@@ -8,6 +8,8 @@ import os
 from PyPDF2 import PdfReader
 from docx import Document
 
+from ocr_extractor import extract_text_from_image, is_image
+
 # Optional dependencies (graceful fallback if not installed)
 try:
     import yaml as _yaml
@@ -51,6 +53,8 @@ def extract_text(path: str) -> str | None:
             return _extract_csv(path)
         elif ext in (".html", ".htm"):
             return _extract_html(path)
+        elif is_image(path):
+            return extract_text_from_image(path)
         else:
             return None
     except Exception:
