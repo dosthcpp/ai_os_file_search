@@ -83,6 +83,21 @@ Add watch directories via the web UI or `POST /api/watch-path`.
 
 ## Features
 
+### Phase 3
+- **OCR parser** — image files (PNG, JPEG, BMP, TIFF, GIF, WebP) are now indexed.
+  `ocr_extractor.py` uses Tesseract OCR (via pytesseract) to extract visible text; the text is
+  chunked and embedded with `text-embedding-3-small` exactly like any other document,
+  making image contents searchable through the existing `/api/search` endpoint.
+- **CLIP multimodal search** — `packages/core/clip_embedder.py` generates 512-dim visual
+  embeddings via OpenAI CLIP ViT-B/32 (Hugging Face `transformers`).
+  A new `images_clip` ChromaDB collection stores one CLIP vector per image file.
+  Text queries are encoded with CLIP's text tower so natural-language queries retrieve
+  visually matching images via `GET /api/search/images?q=...`.
+- **New API endpoints** — `POST /api/images/index`, `DELETE /api/images/index`,
+  `GET /api/search/images?q=...&n=5`, `GET /api/images`
+- Both features degrade gracefully: if pytesseract / torch / transformers are not
+  installed, image files are silently skipped without crashing the indexer or API.
+
 ### Phase 1
 - **OpenAI embeddings** — `text-embedding-3-small` (1536-dim) for semantic similarity search
 - **Real-time file watching** — watchdog daemon tracks add / modify / delete events
