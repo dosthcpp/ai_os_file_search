@@ -92,6 +92,14 @@ def _col_diffs():
     return get_chroma().get_or_create_collection("file_diffs", metadata={"hnsw:space": "cosine"})
 
 
+def _col_images():
+    """Phase 3: 512-dim CLIP image embeddings, cosine similarity."""
+    return get_chroma().get_or_create_collection(
+        "images_clip",
+        metadata={"hnsw:space": "cosine"},
+    )
+
+
 def _col_images_clip():
     # 512-dim CLIP visual embeddings — separate from the 1536-dim text collections
     return get_chroma().get_or_create_collection("images_clip", metadata={"hnsw:space": "cosine"})
@@ -210,8 +218,8 @@ async def _notify_tree_update():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[START] AI OS Search API starting...", flush=True)
-    # Initialise ChromaDB collections on startup
-    _col_files(); _col_versions(); _col_changes(); _col_diffs(); _col_images_clip()
+    # Initialise ChromaDB collections on startup (Phase 3: also images_clip)
+    _col_files(); _col_versions(); _col_changes(); _col_diffs(); _col_images(); _col_images_clip()
     print("[OK] ChromaDB collections ready", flush=True)
     # Warm up the OpenAI client (validates API key early)
     try:
@@ -287,6 +295,9 @@ def health():
         "embed_model": EMBED_MODEL,
         "embed_dim": EMBED_DIM,
         "openai_client_ready": _openai_client is not None,
+        # Phase 3 capabilities
+        "clip_available": clip_available(),
+        "clip_dim": CLIP_DIM,
     }
 
 
@@ -643,8 +654,8 @@ def search_images(
         import sys
         from pathlib import Path as _Path
         _root = _Path(__file__).resolve().parents[2]
-        if str(_root / "packages" / "file-indexer") not in sys.path:
-            sys.path.insert(0, str(_root / "packages" / "file-indexer"))
+        if str(_root / "packages" / "core") not in sys.path:
+            sys.path.insert(0, str(_root / "packages" / "core"))
         from clip_embedder import get_text_embedding, clip_available
     except ImportError:
         return {"ok": False, "error": "CLIP module not available", "results": []}
