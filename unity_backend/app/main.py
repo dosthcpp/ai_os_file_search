@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime
 import anthropic
 
 from . import database
@@ -51,6 +52,10 @@ class PixelBase(BaseModel):
     x: int
     y: int
     color: str
+
+
+class PixelBatch(BaseModel):
+    pixels: List[PixelBase]
 
 
 class RecommendRequest(BaseModel):
@@ -127,12 +132,17 @@ def register_building(
 
 
 @app.get("/buildings/{building_id}/pixels", response_model=List[PixelBase])
-def get_building_pixels(building_id: str, db: Session = Depends(get_db)):
+def get_building_pixels(building_id: str, updated_after: Optional[float] = None, db: Session = Depends(get_db)):
     building = db.query(Building).filter(Building.id == building_id).first()
     if not building:
         return []
 
-    pixels = db.query(Pixel).filter(Pixel.building_id == building_id).all()
+    query = db.query(Pixel).filter(Pixel.building_id == building_id)
+    if updated_after:
+        dt = datetime.fromtimestamp(updated_after)
+        query = query.filter(Pixel.updated_at > dt)
+
+    pixels = query.all()
     return [
         PixelBase(
             buildingId=p.building_id,
@@ -147,11 +157,25 @@ def get_building_pixels(building_id: str, db: Session = Depends(get_db)):
 
 @app.post("/pixels")
 def create_or_update_pixel(pixel: PixelBase, db: Session = Depends(get_db)):
+    _upsert_pixel(pixel, db)
+    db.commit()
+    return {"status": "success"}
+
+
+@app.post("/pixels/batch")
+def batch_update_pixels(batch: PixelBatch, db: Session = Depends(get_db)):
+    for pixel in batch.pixels:
+        _upsert_pixel(pixel, db)
+    db.commit()
+    return {"status": "success", "count": len(batch.pixels)}
+
+
+def _upsert_pixel(pixel: PixelBase, db: Session):
     building = db.query(Building).filter(Building.id == pixel.buildingId).first()
     if not building:
         building = Building(id=pixel.buildingId, recommend_count=0, summary="")
         db.add(building)
-        db.commit()
+        db.flush()
 
     existing = db.query(Pixel).filter(
         Pixel.building_id == pixel.buildingId,
@@ -162,6 +186,7 @@ def create_or_update_pixel(pixel: PixelBase, db: Session = Depends(get_db)):
 
     if existing:
         existing.color = pixel.color
+        existing.updated_at = datetime.now()
     else:
         db.add(Pixel(
             building_id=pixel.buildingId,
@@ -170,9 +195,6 @@ def create_or_update_pixel(pixel: PixelBase, db: Session = Depends(get_db)):
             y=pixel.y,
             color=pixel.color,
         ))
-
-    db.commit()
-    return {"status": "success"}
 
 
 @app.delete("/pixels")

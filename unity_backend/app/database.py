@@ -1,5 +1,6 @@
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, UniqueConstraint, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.sql import func
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./unity_app.db"
 
@@ -17,6 +18,7 @@ class Building(Base):
     name = Column(String, nullable=True)
     recommend_count = Column(Integer, default=0)
     summary = Column(String, default="")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     pixels = relationship("Pixel", back_populates="building")
 
@@ -30,5 +32,6 @@ class Pixel(Base):
     x = Column(Integer)
     y = Column(Integer)
     color = Column(String)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     building = relationship("Building", back_populates="pixels")
