@@ -238,8 +238,8 @@ def _handle_file_delete(path: str):
     if chunk_ids:
         delete_chunks(chunk_ids)
 
-    # Phase 3: CLIP image embedding deletion
-    if Path(path).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+    # Phase 3: remove CLIP embedding for image files
+    if is_image(path):
         delete_image_embedding(path)
 
     save_file_version(

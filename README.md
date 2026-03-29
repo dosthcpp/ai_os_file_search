@@ -102,16 +102,21 @@ Add watch directories via the web UI or `POST /api/watch-path`.
 - **Tabbed right panel** — *File Content* and *Version History* tabs on the right side.
 - **Search history** — recent queries persisted to `localStorage` with autocomplete dropdown.
 
+### Phase 3
+- **OCR text extraction** — images (PNG, JPG, WebP, TIFF, etc.) are scanned using Tesseract OCR.
+  Extracted text is indexed alongside regular documents, making images searchable via text keywords.
+- **Multimodal search (CLIP)** — uses OpenAI CLIP (ViT-B/32) to generate visual embeddings.
+- **Natural-language image search** — a new `/api/search/images` endpoint allows searching for images using descriptive text (e.g., "a photo of a cat") via the CLIP text tower.
+- **Independent modules** — CLIP and OCR logic are encapsulated in standalone packages for easy scaling.
+
 ---
 
 ## Embedding model
 
-| | Value |
-|--|-------|
-| Provider | OpenAI |
-| Model | `text-embedding-3-small` |
-| Dimension | 1536 |
-| Distance metric | Cosine similarity |
+| Model | Dimension | Purpose |
+|-------|-----------|---------|
+| `text-embedding-3-small` | 1536 | Text & Document search |
+| `openai/clip-vit-base-patch32` | 512 | Image & Multimodal search |
 
 > **Note:** switching models requires clearing `data/chroma/` because the vector dimensions differ.
 
@@ -125,6 +130,7 @@ Add watch directories via the web UI or `POST /api/watch-path`.
 | Source code | `.py` `.js` `.ts` `.tsx` `.jsx` `.java` `.go` `.rs` `.rb` `.cpp` `.c` `.h` `.cs` `.swift` `.kt` `.scala` `.sh` `.bash` `.zsh` |
 | Data | `.json` `.yaml` `.yml` `.csv` |
 | Documents | `.pdf` `.docx` `.html` `.htm` |
+| Images (OCR/CLIP) | `.png` `.jpg` `.jpeg` `.webp` `.tiff` `.bmp` `.gif` |
 
 ---
 
@@ -150,6 +156,8 @@ Add watch directories via the web UI or `POST /api/watch-path`.
 | GET | `/api/changed-files/tree` | File tree JSON |
 | GET | `/api/files/versions?path=...` | Version history |
 | GET | `/api/files/version/diff?path=...&version=N` | Version diff |
+| GET | `/api/search/images?q=...` | CLIP-based image search |
+| POST | `/api/images/index` | Manual image index entry |
 | WS | `/ws/file-tree` | Real-time tree updates |
 
 ---

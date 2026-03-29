@@ -3,6 +3,12 @@ AI OS — Search API
 
 FastAPI gateway for ChromaDB-based semantic search and file indexing.
 Embeddings are generated via OpenAI text-embedding-3-small (1536 dims).
+
+Phase 3 additions:
+  - images_clip ChromaDB collection (CLIP ViT-B/32, 512-dim cosine)
+  - POST   /api/images/index  — store a pre-computed CLIP image embedding
+  - DELETE /api/images/index  — remove a CLIP embedding by file path
+  - GET    /api/search/images — cross-modal image search via CLIP text encoder
 """
 from __future__ import annotations
 
@@ -33,6 +39,10 @@ if sys.platform == "win32":
 ROOT_DIR = Path(__file__).resolve().parents[2]  # workspace root
 SETTINGS_FILE = ROOT_DIR / "config" / "settings.json"
 CHROMA_PATH = str(ROOT_DIR / "data" / "chroma")
+
+# ── Phase 3: CLIP embedder (shared with file-indexer via packages/core) ───────
+sys.path.insert(0, str(ROOT_DIR / "packages" / "core"))
+from clip_embedder import CLIP_DIM, clip_available, get_text_embedding  # noqa: E402
 
 # ── settings (persistent watch_paths) ────────────────────────────────────────
 
