@@ -11,6 +11,7 @@
   - 4:00 PM: Daily report to Tony (Completed, Incomplete/Reasons, Tomorrow's Plan, Notes).
 * **Cost & Logic Rules**:
   - **Session Reset**: When the user requests `/clear` or "세션 초기화", immediately execute `scripts/reset_session.sh`.
+  - **Session Clear Preparation**: When the user says "세션 클리어 준비", summarize all key decisions, project progress, and pending tasks from the current session into `MEMORY.md` (or a daily memory file) before any reset.
   - **Retry Limit**: Max 2-3 attempts per task. If it fails, STOP and report.
   - **Model Priority**: Always use **Gemini 3 Flash (`google/gemini-3-flash-preview`)** for routine tasks and standard development. Only use **Gemini 3.1 Pro (`google/gemini-3.1-pro-preview`)** for heavy reasoning or when specifically requested for "high-level" work.
   - Claude Code Rules: Python 3.11+, local ChromaDB, OpenAI Embedding. Independent modules, English comments, keep README updated.

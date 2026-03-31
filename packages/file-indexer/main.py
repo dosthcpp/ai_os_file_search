@@ -49,6 +49,7 @@ from client import (
 from embedder import get_embedding  # noqa: E402 (core)
 from text_extractor import extract_text
 from secret_scanner import SecretScanner
+from sec_ai_analyzer import SecAIAnalyzer
 from utils import (
     chunk_id_to_uuid,
     compute_diff,
@@ -185,6 +186,10 @@ def index_file(path: str, from_scan: bool = False):
 
         # Phase 4: Secret Scanning (Security Audit)
         security_meta = SecretScanner.get_summary_metadata(text)
+        
+        # Phase 5: SecAI & Voice Phishing Analysis
+        sec_ai_meta = SecAIAnalyzer.get_summary_metadata(text)
+        security_meta.update(sec_ai_meta)
 
         chunks = chunk_text(text)
         chunk_ids = []

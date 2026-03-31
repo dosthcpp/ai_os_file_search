@@ -1,0 +1,22 @@
+Refine the following PoCs in the /Users/tony/.openclaw/workspace/pocs directory:
+
+1. **PoC 1 (patent-poc-v2-1)**:
+   - Enhance APK static analysis simulation. Instead of hardcoded behaviors, implement a logic that simulates scanning for dangerous permission strings (e.g., READ_SMS, INSTALL_PACKAGES) and suspicious URL patterns in a mock APK manifest or string file.
+   - Improve the report output with a more detailed threat score breakdown.
+
+2. **PoC 2 (patent-poc-v2-2)**:
+   - Add a `LedgerViewer` class that can iterate through the blockchain ledger and print a formatted summary of all minted and signed NFT consents.
+   - Include a validation method to check the hash integrity between blocks.
+
+3. **PoC 3 (patent-poc-v2-3)**:
+   - Enhance the Adaptive UI engine. Use the `Pillow` (PIL) library to extract the dominant color from a provided image path (simulated if image is missing, but implement the logic).
+   - Use this dominant color as the 'representative_color' for the Euclidean distance calculation.
+
+Guidelines:
+- Python 3.11+.
+- Independent modules.
+- Use English comments.
+- Update README.md in each PoC folder.
+- Follow existing structures in poc_main.py.
+
+Alert when finished.
