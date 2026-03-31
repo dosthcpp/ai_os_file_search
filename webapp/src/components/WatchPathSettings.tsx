@@ -1,10 +1,31 @@
 import { useEffect, useState } from 'react';
-import { getWatchPaths, addWatchPath, removeWatchPath } from '../api.ts';
+import { getWatchPaths, addWatchPath, removeWatchPath, extractTheme, ThemeExtractResult } from '../api.ts';
+import { useOSStore } from '../store';
 
 export default function WatchPathSettings() {
     const [paths, setPaths] = useState<string[]>([]);
     const [tempPath, setTempPath] = useState<string>('');
     const [loading, setLoading] = useState(false);
+    const [wallpaperPath, setWallpaperPath] = useState<string>('');
+    const [themeLoading, setThemeLoading] = useState(false);
+    const [themeResult, setThemeResult] = useState<ThemeExtractResult | null>(null);
+    const [themeError, setThemeError] = useState<string | null>(null);
+    const { setAdaptiveTheme } = useOSStore();
+
+    const applyTheme = async () => {
+        if (!wallpaperPath.trim()) return;
+        setThemeLoading(true);
+        setThemeError(null);
+        try {
+            const result = await extractTheme(wallpaperPath.trim());
+            setThemeResult(result);
+            setAdaptiveTheme({ palette: result.palette, dominantColor: result.dominant_color });
+        } catch {
+            setThemeError('Failed to extract theme — is the server running?');
+        } finally {
+            setThemeLoading(false);
+        }
+    };
 
     const load = async () => {
         try {
@@ -91,6 +112,37 @@ export default function WatchPathSettings() {
                     </li>
                 ))}
             </ul>
+
+            {/* ── Theme Engine ─────────────────────────────── */}
+            <div style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
+                <p style={{ fontWeight: 'bold', margin: '0 0 8px 0' }}>Adaptive Theme (v2-3)</p>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                    <input
+                        type="text"
+                        placeholder="/path/to/wallpaper.jpg"
+                        value={wallpaperPath}
+                        onChange={e => setWallpaperPath(e.target.value)}
+                        style={{ flex: 1, padding: '4px 8px', fontSize: 12 }}
+                    />
+                    <button onClick={applyTheme} disabled={themeLoading || !wallpaperPath.trim()}>
+                        {themeLoading ? 'Extracting...' : 'Apply'}
+                    </button>
+                </div>
+                {themeResult && (
+                    <div style={{ fontSize: 11 }}>
+                        <div>Dominant: rgb({themeResult.dominant_color.r}, {themeResult.dominant_color.g}, {themeResult.dominant_color.b}) | Luma: {themeResult.luma} | Theme: <b>{themeResult.theme}</b></div>
+                        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                            {Object.entries(themeResult.palette).map(([key, color]) => (
+                                <div key={key} style={{ textAlign: 'center' }}>
+                                    <div style={{ width: 28, height: 28, borderRadius: 6, background: color, border: '1px solid #ccc', margin: '0 auto' }} />
+                                    <div style={{ fontSize: 10, color: '#888' }}>{key}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                {themeError && <div style={{ color: '#d46', fontSize: 11 }}>{themeError}</div>}
+            </div>
         </div>
     );
 }

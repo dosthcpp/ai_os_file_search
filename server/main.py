@@ -6,6 +6,10 @@ from time import time as now
 from typing import List
 from uuid import uuid4
 from pathlib import Path
+import re as _re
+import hashlib as _hashlib
+import math as _math
+import json as _json
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -572,3 +576,164 @@ async def websocket_file_tree(websocket: WebSocket):
     except Exception as e:
         print("ws error:", e)
         manager.disconnect(websocket)
+
+
+# ── PoC v2-1: Security Audit ────────────────────────────────────────────────
+
+_DANGEROUS_PERMISSIONS = {
+    "READ_SMS":             {"score": 35, "reason": "Can silently read private SMS messages (OTP theft risk)"},
+    "RECEIVE_SMS":          {"score": 25, "reason": "Can intercept incoming SMS in real time"},
+    "INSTALL_PACKAGES":     {"score": 40, "reason": "Can silently install additional malicious APKs"},
+    "READ_CONTACTS":        {"score": 20, "reason": "Can exfiltrate user contact list"},
+    "RECORD_AUDIO":         {"score": 30, "reason": "Can activate microphone without user awareness"},
+    "ACCESS_FINE_LOCATION": {"score": 15, "reason": "Precise GPS tracking, possible stalkerware vector"},
+}
+
+_SUSPICIOUS_URL_PATTERNS = [
+    (_re.compile(r"https?://\d{1,3}(?:\.\d{1,3}){3}"), "Direct IP address endpoint — no domain name, common evasion tactic", 20),
+    (_re.compile(r'https?://[^\s"\']*(?:\.ru|\.biz|\.xyz|\.top)[^\s"\']*'), "High-risk TLD frequently associated with phishing campaigns", 20),
+    (_re.compile(r'https?://[^\s"\']*(?:exfil|track|collect|evil|phish)[^\s"\']*'), "Keyword matching known data-exfiltration or phishing patterns", 20),
+]
+
+_SENSITIVE_PI_PATTERNS = {"RRN": r"\d{6}-\d{7}", "Bank": r"\d{10,14}"}
+
+
+class SecurityAuditRequest(BaseModel):
+    manifest: str = ""
+    strings: str = ""
+    document_text: str = ""
+
+
+@app.post("/api/security/audit")
+def security_audit(req: SecurityAuditRequest):
+    perm_findings = []
+    for perm_name, meta in _DANGEROUS_PERMISSIONS.items():
+        pattern = rf"android\.permission\.{_re.escape(perm_name)}"
+        if _re.search(pattern, req.manifest):
+            perm_findings.append({
+                "permission": f"android.permission.{perm_name}",
+                "score": meta["score"],
+                "reason": meta["reason"],
+            })
+
+    url_findings = []
+    for compiled, description, score in _SUSPICIOUS_URL_PATTERNS:
+        for match in compiled.findall(req.strings):
+            url_findings.append({"url": match, "score": score, "reason": description})
+
+    perm_score = sum(f["score"] for f in perm_findings)
+    url_score = sum(f["score"] for f in url_findings)
+    total_score = min(perm_score + url_score, 100)
+    threat_level = "CRITICAL" if total_score >= 70 else "WARNING" if total_score >= 40 else "SAFE"
+
+    pi_findings = []
+    for label, pat in _SENSITIVE_PI_PATTERNS.items():
+        if _re.search(pat, req.document_text):
+            pi_findings.append(f"{label} detected")
+
+    return {
+        "apk_analysis": {
+            "threat_level": threat_level,
+            "total_score": total_score,
+            "score_breakdown": {"permission_score": perm_score, "url_score": url_score},
+            "permission_findings": perm_findings,
+            "url_findings": url_findings,
+            "summary": f"{len(perm_findings)} dangerous permission(s) and {len(url_findings)} suspicious URL(s) detected.",
+        },
+        "pi_analysis": {
+            "risk": "CRITICAL" if pi_findings else "SAFE",
+            "encryption": "RSA-OAEP + AES-256" if pi_findings else "None",
+            "details": pi_findings,
+        },
+    }
+
+
+# ── PoC v2-2: NFT E-Consent ─────────────────────────────────────────────────
+
+class ConsentSignRequest(BaseModel):
+    teacher_id: str
+    title: str
+    parent_id: str
+    signature_pattern: list[float]
+
+
+@app.post("/api/consent/sign")
+def consent_sign(req: ConsentSignRequest):
+    nft_id_raw = _hashlib.sha1(f"{req.teacher_id}{req.title}".encode()).hexdigest()[:8]
+    nft_id = f"CONSENT-{nft_id_raw}"
+
+    integrity = "VERIFIED" if len(req.signature_pattern) > 5 else "FLAGGED"
+
+    nft_data = {
+        "nft_id": nft_id,
+        "owner": req.parent_id,
+        "title": req.title,
+        "status": "COMPLETED",
+        "integrity": integrity,
+    }
+
+    prev_hash = "0" * 64
+    block_input = _json.dumps(nft_data, sort_keys=True) + prev_hash
+    block_hash = _hashlib.sha256(block_input.encode()).hexdigest()
+
+    return {
+        "nft_id": nft_id,
+        "integrity": integrity,
+        "block": {
+            "data": nft_data,
+            "prev_hash": prev_hash,
+            "block_hash": block_hash,
+        },
+    }
+
+
+# ── PoC v2-3: Adaptive UI Theme ──────────────────────────────────────────────
+
+_THEME_RECOMMENDATIONS = {
+    "dark_bg":   {"text": "#FFFFFF", "button": "#4A90E2", "icon": "#F5A623", "bg": "#1e293b"},
+    "bright_bg": {"text": "#000000", "button": "#D0021B", "icon": "#417505", "bg": "#f8f9fa"},
+}
+
+
+class ThemeExtractRequest(BaseModel):
+    image_path: str
+    threshold: int = 50
+
+
+@app.post("/api/theme/extract")
+def theme_extract(req: ThemeExtractRequest):
+    from pathlib import Path as _Path
+
+    dominant_rgb: tuple[int, int, int]
+
+    try:
+        from PIL import Image as _Image
+        p = _Path(req.image_path)
+        if p.exists():
+            with _Image.open(p) as img:
+                img = img.convert("RGB")
+                img.thumbnail((64, 64))
+                quantized = img.quantize(colors=8)
+                palette = quantized.getpalette()
+                pixel_counts = quantized.getcolors()
+                if pixel_counts:
+                    dominant_index = max(pixel_counts, key=lambda x: x[0])[1]
+                    dominant_rgb = (palette[dominant_index * 3], palette[dominant_index * 3 + 1], palette[dominant_index * 3 + 2])
+                else:
+                    dominant_rgb = (palette[0], palette[1], palette[2])
+        else:
+            dominant_rgb = (128, 128, 128)
+    except ImportError:
+        dominant_rgb = (128, 128, 128)
+
+    r, g, b = dominant_rgb
+    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    theme_key = "bright_bg" if luma > 128 else "dark_bg"
+    palette_out = _THEME_RECOMMENDATIONS[theme_key]
+
+    return {
+        "dominant_color": {"r": r, "g": g, "b": b},
+        "luma": round(luma, 2),
+        "theme": theme_key,
+        "palette": palette_out,
+    }

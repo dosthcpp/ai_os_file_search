@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type WindowType = 'file-tree' | 'file-search' | 'file-content' | 'version-history' | 'security-audit' | 'settings';
+export type WindowType = 'file-tree' | 'file-search' | 'file-content' | 'version-history' | 'security-audit' | 'settings' | 'consent';
 
 export interface WindowInstance {
   id: string;
@@ -23,18 +23,21 @@ interface OSState {
   maximizeWindow: (id: string) => void;
   focusWindow: (id: string) => void;
   restoreWindow: (id: string) => void;
+  adaptiveTheme: { palette: { text: string; button: string; icon: string; bg: string }; dominantColor: { r: number; g: number; b: number } } | null;
+  setAdaptiveTheme: (theme: OSState['adaptiveTheme']) => void;
 }
 
 export const useOSStore = create<OSState>((set, get) => ({
   windows: [],
   activeWindowId: null,
   nextZIndex: 100,
+  adaptiveTheme: null,
 
   openWindow: (type, title, params) => {
     const { windows, nextZIndex } = get();
     
     // For single-instance windows like file-tree, search, etc., focus if already open
-    if (['file-tree', 'file-search', 'security-audit', 'settings'].includes(type)) {
+    if (['file-tree', 'file-search', 'security-audit', 'settings', 'consent'].includes(type)) {
       const existing = windows.find(w => w.type === type);
       if (existing) {
         get().focusWindow(existing.id);
@@ -115,4 +118,6 @@ export const useOSStore = create<OSState>((set, get) => ({
     }));
     get().focusWindow(id);
   },
+
+  setAdaptiveTheme: (theme) => set({ adaptiveTheme: theme }),
 }));
