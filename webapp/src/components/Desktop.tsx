@@ -17,7 +17,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { useOSStore, WindowType } from '../store';
-import { runSecurityAudit, signConsent, SecurityAuditResult, ConsentSignResult } from '../api';
+import { runSecurityAudit, signConsent, getSecurityTestCases, SecurityAuditResult, ConsentSignResult, SecurityTestCase } from '../api';
 import WindowFrame from './WindowFrame';
 import FileTree from './FileTree';
 import WatchPathSettings from './WatchPathSettings';
@@ -291,6 +291,24 @@ const SecurityAuditWindow: React.FC = () => {
     const [auditData, setAuditData] = React.useState<SecurityAuditResult | null>(null);
     const [loading, setLoading] = React.useState(false);
     const [activeTab, setActiveTab] = React.useState<'apk' | 'pi'>('apk');
+    const [testCases, setTestCases] = React.useState<SecurityTestCase[]>([]);
+    const [selectedTC, setSelectedTC] = React.useState<string>('');
+
+    React.useEffect(() => {
+        getSecurityTestCases().then(setTestCases).catch(() => {});
+    }, []);
+
+    const loadTestCase = (id: string) => {
+        const tc = testCases.find(t => t.id === id);
+        if (!tc) return;
+        setManifest(tc.manifest);
+        setStrings(tc.strings);
+        setDocText(tc.document_text);
+        setSelectedTC(id);
+        setAuditData(null);
+        if (tc.document_text && !tc.manifest) setActiveTab('pi');
+        else setActiveTab('apk');
+    };
 
     const run = async () => {
         setLoading(true);
@@ -307,6 +325,8 @@ const SecurityAuditWindow: React.FC = () => {
     const apk = auditData?.apk_analysis;
     const pi = auditData?.pi_analysis;
     const scoreColor = apk ? (apk.total_score >= 70 ? '#cf1322' : apk.total_score >= 40 ? '#faad14' : '#52c41a') : '#3b82f6';
+
+    const selectedTCObj = testCases.find(t => t.id === selectedTC);
 
     return (
         <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'auto' }}>
@@ -327,6 +347,32 @@ const SecurityAuditWindow: React.FC = () => {
                     Run Audit
                 </Button>
             </div>
+
+            {/* Test Cases Panel */}
+            {testCases.length > 0 && (
+                <div style={{ background: '#f0f5ff', border: '1px solid #d6e4ff', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <AlertTriangle size={12} color="#1d4ed8" />
+                        <span style={{ fontSize: 11, fontWeight: 600, color: '#1d4ed8' }}>MALICIOUS PATTERN TEST CASES</span>
+                        <span style={{ fontSize: 10, color: '#93c5fd', marginLeft: 'auto' }}>{testCases.length} scenarios</span>
+                    </div>
+                    <select
+                        value={selectedTC}
+                        onChange={e => loadTestCase(e.target.value)}
+                        style={{ width: '100%', fontSize: 12, padding: '5px 8px', border: '1px solid #93c5fd', borderRadius: 6, background: '#fff', color: '#1e3a8a', cursor: 'pointer', outline: 'none' }}
+                    >
+                        <option value="">— Select a test scenario —</option>
+                        {testCases.map(tc => (
+                            <option key={tc.id} value={tc.id}>{tc.name}</option>
+                        ))}
+                    </select>
+                    {selectedTCObj && (
+                        <div style={{ fontSize: 11, color: '#3b82f6', lineHeight: 1.4, paddingTop: 2 }}>
+                            {selectedTCObj.description}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Tabs */}
             <div style={{ display: 'flex', borderBottom: '1px solid #e8e8e8' }}>

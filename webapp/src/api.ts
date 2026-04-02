@@ -123,3 +123,17 @@ export async function signConsent(teacher_id: string, title: string, parent_id: 
   const res = await api.post('/api/consent/sign', { teacher_id, title, parent_id, signature_pattern });
   return res.data;
 }
+
+export type SecurityTestCase = {
+  id: string;
+  name: string;
+  description: string;
+  manifest: string;
+  strings: string;
+  document_text: string;
+};
+
+export async function getSecurityTestCases(): Promise<SecurityTestCase[]> {
+  const res = await api.get('/api/security/test-cases');
+  return res.data;
+}
