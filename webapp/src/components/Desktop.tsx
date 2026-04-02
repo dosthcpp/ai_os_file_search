@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Layout, Typography, Space, Tooltip, Badge, Dropdown, theme, Progress } from 'antd';
+import { Card, Button, Layout, Typography, Space, Tooltip, Badge, Dropdown, theme, Progress, Tag, Select } from 'antd';
 import {
   FolderTree,
   Search,
@@ -292,7 +292,8 @@ const SecurityAuditWindow: React.FC = () => {
     const [loading, setLoading] = React.useState(false);
     const [activeTab, setActiveTab] = React.useState<'apk' | 'pi'>('apk');
     const [testCases, setTestCases] = React.useState<SecurityTestCase[]>([]);
-    const [selectedTC, setSelectedTC] = React.useState<string>('');
+    const [selectedCaseId, setSelectedCaseId] = React.useState<string | null>(null);
+    const [caseDesc, setCaseDesc] = React.useState<string | null>(null);
 
     React.useEffect(() => {
         getSecurityTestCases().then(setTestCases).catch(() => {});
@@ -301,13 +302,13 @@ const SecurityAuditWindow: React.FC = () => {
     const loadTestCase = (id: string) => {
         const tc = testCases.find(t => t.id === id);
         if (!tc) return;
+        setSelectedCaseId(id);
+        setCaseDesc(tc.description);
         setManifest(tc.manifest);
         setStrings(tc.strings);
         setDocText(tc.document_text);
-        setSelectedTC(id);
         setAuditData(null);
-        if (tc.document_text && !tc.manifest) setActiveTab('pi');
-        else setActiveTab('apk');
+        setActiveTab(tc.manifest ? 'apk' : 'pi');
     };
 
     const run = async () => {
@@ -325,8 +326,6 @@ const SecurityAuditWindow: React.FC = () => {
     const apk = auditData?.apk_analysis;
     const pi = auditData?.pi_analysis;
     const scoreColor = apk ? (apk.total_score >= 70 ? '#cf1322' : apk.total_score >= 40 ? '#faad14' : '#52c41a') : '#3b82f6';
-
-    const selectedTCObj = testCases.find(t => t.id === selectedTC);
 
     return (
         <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'auto' }}>
@@ -348,27 +347,38 @@ const SecurityAuditWindow: React.FC = () => {
                 </Button>
             </div>
 
-            {/* Test Cases Panel */}
+            {/* Test Case Selector */}
             {testCases.length > 0 && (
-                <div style={{ background: '#f0f5ff', border: '1px solid #d6e4ff', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                        <AlertTriangle size={12} color="#1d4ed8" />
-                        <span style={{ fontSize: 11, fontWeight: 600, color: '#1d4ed8' }}>MALICIOUS PATTERN TEST CASES</span>
-                        <span style={{ fontSize: 10, color: '#93c5fd', marginLeft: 'auto' }}>{testCases.length} scenarios</span>
+                <div style={{ background: '#f8faff', border: '1px solid #dbeafe', borderRadius: 8, padding: '8px 12px' }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#3b82f6', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <ShieldAlert size={11} />
+                        MALICIOUS PATTERN TEST CASES ({testCases.length})
                     </div>
-                    <select
-                        value={selectedTC}
-                        onChange={e => loadTestCase(e.target.value)}
-                        style={{ width: '100%', fontSize: 12, padding: '5px 8px', border: '1px solid #93c5fd', borderRadius: 6, background: '#fff', color: '#1e3a8a', cursor: 'pointer', outline: 'none' }}
-                    >
-                        <option value="">— Select a test scenario —</option>
-                        {testCases.map(tc => (
-                            <option key={tc.id} value={tc.id}>{tc.name}</option>
-                        ))}
-                    </select>
-                    {selectedTCObj && (
-                        <div style={{ fontSize: 11, color: '#3b82f6', lineHeight: 1.4, paddingTop: 2 }}>
-                            {selectedTCObj.description}
+                    <Select
+                        placeholder="Select a test scenario to load…"
+                        value={selectedCaseId}
+                        onChange={loadTestCase}
+                        size="small"
+                        style={{ width: '100%' }}
+                        options={testCases.map(tc => {
+                            const isCritical = tc.name.toLowerCase().includes('apt') || tc.name.toLowerCase().includes('ransomware') || tc.name.toLowerCase().includes('trojan') || tc.name.toLowerCase().includes('overlay') || tc.name.toLowerCase().includes('stealer') || tc.name.toLowerCase().includes('stalker') || tc.name.toLowerCase().includes('surveillance');
+                            return {
+                                value: tc.id,
+                                label: (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span style={{
+                                            display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+                                            background: isCritical ? '#cf1322' : '#faad14', flexShrink: 0
+                                        }} />
+                                        <span style={{ fontSize: 12 }}>{tc.name}</span>
+                                    </span>
+                                ),
+                            };
+                        })}
+                    />
+                    {caseDesc && (
+                        <div style={{ marginTop: 6, fontSize: 11, color: '#555', lineHeight: 1.5, padding: '4px 6px', background: 'white', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+                            {caseDesc}
                         </div>
                     )}
                 </div>

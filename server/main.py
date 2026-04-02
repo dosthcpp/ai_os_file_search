@@ -187,6 +187,9 @@ _DANGEROUS_PERMISSIONS = {
     "BIND_ACCESSIBILITY_SERVICE": {"score": 45, "reason": "Highest risk — enables keylogging, overlay attacks, and UI automation abuse"},
     "GET_ACCOUNTS":               {"score": 15, "reason": "Can harvest Google/social account identifiers for credential stuffing"},
     "READ_PHONE_STATE":           {"score": 15, "reason": "Exposes IMEI and device fingerprint for persistent cross-app tracking"},
+    "CALL_PHONE":              {"score": 20, "reason": "Can silently initiate phone calls — used in voice phishing (vishing) attacks"},
+    "DISABLE_KEYGUARD":        {"score": 30, "reason": "Can bypass screen lock — used by ransomware to prevent victim from accessing device"},
+    "WRITE_EXTERNAL_STORAGE":  {"score": 15, "reason": "Can write files to external storage — used for ransomware data staging and payload delivery"},
 }
 
 _SUSPICIOUS_URL_PATTERNS = [
@@ -207,6 +210,8 @@ _SUSPICIOUS_URL_PATTERNS = [
      "Heavily percent-encoded URL — likely obfuscating malicious destination to bypass static analysis", 20),
     (_re.compile(r'https?://[a-z0-9]{12,30}\.[a-z]{2,6}/'),
      "Algorithmically-generated domain (DGA) pattern — characteristic of botnet C2 communication", 25),
+    (_re.compile(r'https?://[^\s"\']*ngrok\.io[^\s"\']*'),
+     "ngrok reverse-proxy tunnel — commonly used to expose local C2 servers from behind NAT", 25),
 ]
 
 _SENSITIVE_PI_PATTERNS = {
@@ -298,6 +303,22 @@ SECURITY_TEST_CASES = [
         "manifest": "",
         "strings": "",
         "document_text": "Applicant: John Doe\nEmail: john.doe@example.com\nPassport: M12345678\nCredit Card: 4532015112830366\nExpiry: 03/2027",
+    },
+    {
+        "id": "tc_11",
+        "name": "TC-11: Voice Phishing (Vishing) Agent",
+        "description": "Impersonates government authority (tax office/police), intercepts calls, harvests contact list for large-scale vishing campaigns",
+        "manifest": '<manifest package="com.gov.tax.refund.assist">\n  <uses-permission android:name="android.permission.CALL_PHONE"/>\n  <uses-permission android:name="android.permission.READ_CONTACTS"/>\n  <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS"/>\n  <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n  <uses-permission android:name="android.permission.INTERNET"/>\n</manifest>',
+        "strings": '<resources>\n  <string name="vishing_server">https://calltrack.ru/collect</string>\n  <string name="contact_upload">http://phonebook.evil.biz/harvest</string>\n</resources>',
+        "document_text": "",
+    },
+    {
+        "id": "tc_12",
+        "name": "TC-12: Ransomware Dropper + Keyguard Bypass",
+        "description": "Encrypts external storage files and disables screen lock, then installs secondary payload via C2 server",
+        "manifest": '<manifest package="com.file.cleaner.pro">\n  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>\n  <uses-permission android:name="android.permission.INSTALL_PACKAGES"/>\n  <uses-permission android:name="android.permission.DISABLE_KEYGUARD"/>\n  <uses-permission android:name="android.permission.INTERNET"/>\n</manifest>',
+        "strings": '<resources>\n  <string name="c2">http://203.0.113.99/ransom/drop</string>\n  <string name="payload">https://abc123xyzdef456.ngrok.io/payload.apk</string>\n  <string name="key_server">http://ransom-pay.top/key</string>\n</resources>',
+        "document_text": "",
     },
 ]
 

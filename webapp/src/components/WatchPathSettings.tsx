@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Button, Input, Typography, Space, Tag, Divider, Alert } from 'antd';
-import { FolderOpen, Trash2, Plus, Palette, CheckCircle2 } from 'lucide-react';
+import { Button, Input, Tag, Typography, Space, Divider, Spin } from 'antd';
+import { FolderOpen, Palette, X, Plus } from 'lucide-react';
 import { getWatchPaths, addWatchPath, removeWatchPath, extractTheme, ThemeExtractResult } from '../api.ts';
 import { useOSStore } from '../store';
 
-const { Text } = Typography;
+const { Text, Title } = Typography;
 
 export default function WatchPathSettings() {
     const [paths, setPaths] = useState<string[]>([]);
@@ -42,10 +42,7 @@ export default function WatchPathSettings() {
 
     const onAdd = async () => {
         if (!tempPath.trim()) return;
-        if (paths.includes(tempPath.trim())) {
-            alert('Path already registered');
-            return;
-        }
+        if (paths.includes(tempPath.trim())) return;
         setLoading(true);
         try {
             const { ok, error } = await addWatchPath(tempPath.trim());
@@ -74,137 +71,109 @@ export default function WatchPathSettings() {
         }
     };
 
-    const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') onAdd();
-    };
-
-    useEffect(() => {
-        load();
-    }, []);
+    useEffect(() => { load(); }, []);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             {/* Watch Directories Section */}
-            <div style={{ marginBottom: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-                    <FolderOpen size={15} color="#3b82f6" />
-                    <Text strong style={{ fontSize: 13 }}>Watch Directories</Text>
+            <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                    <FolderOpen size={14} color="#3b82f6" />
+                    <Title level={5} style={{ margin: 0, fontSize: 13, color: '#1e293b' }}>Watch Directories</Title>
                 </div>
 
-                <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
+                <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
                     <Input
-                        placeholder="/path/to/watch"
+                        size="small"
+                        placeholder="/path/to/directory"
                         value={tempPath}
                         onChange={e => setTempPath(e.target.value)}
-                        onKeyDown={onKeyDown}
+                        onPressEnter={onAdd}
                         disabled={loading}
-                        size="small"
                         style={{ fontSize: 12 }}
                     />
                     <Button
+                        size="small"
                         type="primary"
-                        icon={<Plus size={13} />}
+                        icon={<Plus size={12} />}
                         onClick={onAdd}
                         disabled={loading || !tempPath.trim()}
-                        size="small"
+                        style={{ display: 'flex', alignItems: 'center' }}
                     >
                         Add
                     </Button>
                 </Space.Compact>
 
-                {paths.length === 0 ? (
-                    <div style={{ padding: '10px 0', textAlign: 'center', color: '#bbb', fontSize: 12 }}>
-                        No directories watched yet
-                    </div>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {paths.map(p => (
-                            <div
-                                key={p}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: 8,
-                                    padding: '6px 10px', background: '#f8faff',
-                                    border: '1px solid #e0e8ff', borderRadius: 6,
-                                }}
-                            >
-                                <FolderOpen size={13} color="#3b82f6" style={{ flexShrink: 0 }} />
-                                <span style={{ flex: 1, fontSize: 12, wordBreak: 'break-all', color: '#374151', fontFamily: 'monospace' }}>{p}</span>
-                                <Button
-                                    type="text"
-                                    size="small"
-                                    danger
-                                    icon={<Trash2 size={12} />}
-                                    onClick={() => onRemove(p)}
-                                    disabled={loading}
-                                    style={{ flexShrink: 0, padding: '0 6px', height: 24 }}
-                                />
-                            </div>
-                        ))}
-                    </div>
-                )}
+                {loading && <Spin size="small" style={{ display: 'block', marginBottom: 6 }} />}
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {paths.length === 0 && !loading && (
+                        <Text type="secondary" style={{ fontSize: 11 }}>No directories watched yet.</Text>
+                    )}
+                    {paths.map(p => (
+                        <Tag
+                            key={p}
+                            closable
+                            onClose={() => onRemove(p)}
+                            closeIcon={<X size={10} />}
+                            style={{ fontSize: 11, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 6 }}
+                            color="blue"
+                        >
+                            {p}
+                        </Tag>
+                    ))}
+                </div>
             </div>
 
             <Divider style={{ margin: '14px 0' }} />
 
             {/* Adaptive Theme Section */}
             <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-                    <Palette size={15} color="#8b5cf6" />
-                    <Text strong style={{ fontSize: 13 }}>Adaptive Theme</Text>
-                    <Tag color="purple" style={{ fontSize: 10, marginLeft: 4 }}>v2-3</Tag>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                    <Palette size={14} color="#8b5cf6" />
+                    <Title level={5} style={{ margin: 0, fontSize: 13, color: '#1e293b' }}>Adaptive Theme</Title>
+                    <Tag style={{ fontSize: 10, padding: '0 6px', borderRadius: 10 }} color="purple">v2-3</Tag>
                 </div>
 
-                <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
+                <Space.Compact style={{ width: '100%', marginBottom: 8 }}>
                     <Input
+                        size="small"
                         placeholder="/path/to/wallpaper.jpg"
                         value={wallpaperPath}
                         onChange={e => setWallpaperPath(e.target.value)}
-                        size="small"
+                        onPressEnter={applyTheme}
                         style={{ fontSize: 12 }}
                     />
                     <Button
-                        type="primary"
-                        icon={<Palette size={13} />}
-                        onClick={applyTheme}
-                        disabled={themeLoading || !wallpaperPath.trim()}
-                        loading={themeLoading}
                         size="small"
+                        type="primary"
+                        onClick={applyTheme}
+                        loading={themeLoading}
+                        disabled={!wallpaperPath.trim()}
                         style={{ background: '#8b5cf6', borderColor: '#8b5cf6' }}
                     >
                         Apply
                     </Button>
                 </Space.Compact>
 
-                {themeError && (
-                    <Alert type="error" message={themeError} style={{ fontSize: 11, padding: '4px 10px', marginBottom: 8 }} />
-                )}
-
                 {themeResult && (
-                    <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 8, padding: '10px 12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                            <CheckCircle2 size={13} color="#7c3aed" />
-                            <Text style={{ fontSize: 11, color: '#7c3aed', fontWeight: 600 }}>
-                                Theme extracted — {themeResult.theme === 'dark_bg' ? 'Dark' : 'Light'} mode
-                            </Text>
-                        </div>
-                        <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, background: '#fafafa', border: '1px solid #e2e8f0', borderRadius: 6, padding: '8px 10px' }}>
+                        <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 6 }}>
                             Dominant: rgb({themeResult.dominant_color.r}, {themeResult.dominant_color.g}, {themeResult.dominant_color.b})
-                            &nbsp;|&nbsp;Luma: {themeResult.luma}
-                        </div>
-                        <div style={{ display: 'flex', gap: 8 }}>
+                            {' '}· Luma: {themeResult.luma}
+                            {' '}· Mode: <b>{themeResult.theme}</b>
+                        </Text>
+                        <div style={{ display: 'flex', gap: 6 }}>
                             {Object.entries(themeResult.palette).map(([key, color]) => (
                                 <div key={key} style={{ textAlign: 'center' }}>
-                                    <div style={{
-                                        width: 32, height: 32, borderRadius: 8, background: color,
-                                        border: '2px solid rgba(0,0,0,0.08)', margin: '0 auto',
-                                        boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
-                                    }} />
-                                    <div style={{ fontSize: 10, color: '#888', marginTop: 4 }}>{key}</div>
+                                    <div style={{ width: 24, height: 24, borderRadius: 5, background: color, border: '1px solid rgba(0,0,0,0.1)', margin: '0 auto' }} />
+                                    <div style={{ fontSize: 9, color: '#888', marginTop: 2 }}>{key}</div>
                                 </div>
                             ))}
                         </div>
                     </div>
                 )}
+                {themeError && <Text type="danger" style={{ fontSize: 11 }}>{themeError}</Text>}
             </div>
         </div>
     );
