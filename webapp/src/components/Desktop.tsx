@@ -1,30 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Layout, Menu, Typography, Space, Tooltip, Avatar, Badge, Dropdown, theme } from 'antd';
+import { Button, Layout, Typography, Space, Tooltip, Badge, Dropdown, theme, Progress } from 'antd';
 import {
   FolderTree,
   Search,
   Settings,
   ShieldAlert,
-  Terminal,
   History,
   FileText,
   Monitor,
   LayoutGrid,
   FileSignature,
-  Palette,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Link,
+  Lock,
 } from 'lucide-react';
 import { useOSStore, WindowType } from '../store';
 import { runSecurityAudit, signConsent, SecurityAuditResult, ConsentSignResult } from '../api';
 import WindowFrame from './WindowFrame';
 import FileTree from './FileTree';
-import SearchBar from './SearchBar';
 import WatchPathSettings from './WatchPathSettings';
 import FileContentViewer from './FileContentViewer';
 import { VersionTimeline } from './VersionTimeline';
-import DiffViewer from './DiffViewer';
 import SearchPanel from './SearchPanel';
 
-const { Header, Content, Footer } = Layout;
+const { Content, Footer } = Layout;
 const { Text } = Typography;
 
 const Desktop: React.FC = () => {
@@ -49,34 +50,35 @@ const Desktop: React.FC = () => {
         case 'version-history':
           return (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              <div style={{ display: 'flex', borderBottom: '1px solid #d9d9d9', background: '#f5f5f5' }}>
-                <Button 
-                  type="text" 
-                  size="small" 
-                  style={{ borderRadius: 0, height: 32, padding: '0 16px', background: win.type === 'file-content' ? '#fff' : 'transparent', fontWeight: win.type === 'file-content' ? 600 : 400 }}
-                  onClick={() => useOSStore.getState().openWindow('file-content', win.title, win.params)}
-                >
-                  File Content
-                </Button>
-                <Button 
-                  type="text" 
-                  size="small" 
-                  style={{ borderRadius: 0, height: 32, padding: '0 16px', background: win.type === 'version-history' ? '#fff' : 'transparent', fontWeight: win.type === 'version-history' ? 600 : 400 }}
-                  onClick={() => useOSStore.getState().openWindow('version-history', win.title, win.params)}
-                >
-                  Version History
-                </Button>
+              <div style={{ display: 'flex', borderBottom: '1px solid #e8e8e8', background: '#fafafa', padding: '0 8px' }}>
+                {[
+                  { type: 'file-content', label: 'File Content', icon: <FileText size={13} /> },
+                  { type: 'version-history', label: 'Version History', icon: <History size={13} /> },
+                ].map(tab => (
+                  <button
+                    key={tab.type}
+                    onClick={() => useOSStore.getState().openWindow(tab.type as any, win.title, win.params)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, height: 34, padding: '0 14px',
+                      border: 'none', borderBottom: win.type === tab.type ? '2px solid #3b82f6' : '2px solid transparent',
+                      background: 'transparent', cursor: 'pointer', fontSize: 12,
+                      fontWeight: win.type === tab.type ? 600 : 400,
+                      color: win.type === tab.type ? '#3b82f6' : '#666',
+                      transition: 'color 0.15s',
+                    }}
+                  >
+                    {tab.icon}{tab.label}
+                  </button>
+                ))}
               </div>
               <div style={{ flex: 1, overflow: 'auto' }}>
                 {win.type === 'file-content' ? (
                   <FileContentViewer path={win.params.path} />
                 ) : (
                   <div style={{ padding: 16 }}>
-                    <VersionTimeline 
-                      path={win.params.path} 
-                      onSelectVersion={(v) => {
-                         // We might want a separate state here for the selected version to show diff
-                      }} 
+                    <VersionTimeline
+                      path={win.params.path}
+                      onSelectVersion={(_v) => {}}
                     />
                   </div>
                 )}
@@ -112,40 +114,32 @@ const Desktop: React.FC = () => {
         }} />
         
         {/* Desktop Icons */}
-        <Space direction="vertical" style={{ position: 'absolute', left: 20, top: 20, zIndex: 1 }} size={20}>
-          <Tooltip title="File Explorer" placement="right">
-            <Button 
-                type="text" 
-                icon={<FolderTree size={32} color="white" />} 
-                style={{ height: 60, width: 60, color: 'white' }}
-                onClick={() => openWindow('file-tree', 'File Explorer')}
-            />
-          </Tooltip>
-          <Tooltip title="Search" placement="right">
-            <Button 
-                type="text" 
-                icon={<Search size={32} color="white" />} 
-                style={{ height: 60, width: 60, color: 'white' }}
-                onClick={() => openWindow('file-search', 'Search Files')}
-            />
-          </Tooltip>
-           <Tooltip title="Security" placement="right">
-            <Button
-                type="text"
-                icon={<ShieldAlert size={32} color="white" />}
-                style={{ height: 60, width: 60, color: 'white' }}
-                onClick={() => openWindow('security-audit', 'Security Audit')}
-            />
-          </Tooltip>
-          <Tooltip title="E-Consent" placement="right">
-            <Button
-                type="text"
-                icon={<FileSignature size={32} color="white" />}
-                style={{ height: 60, width: 60, color: 'white' }}
-                onClick={() => openWindow('consent', 'E-Consent')}
-            />
-          </Tooltip>
-        </Space>
+        <div style={{ position: 'absolute', left: 16, top: 20, zIndex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[
+            { icon: <FolderTree size={28} />, label: 'File Explorer', action: () => openWindow('file-tree', 'File Explorer') },
+            { icon: <Search size={28} />, label: 'Search', action: () => openWindow('file-search', 'Search Files') },
+            { icon: <ShieldAlert size={28} />, label: 'Security', action: () => openWindow('security-audit', 'Security Audit') },
+            { icon: <FileSignature size={28} />, label: 'E-Consent', action: () => openWindow('consent', 'E-Consent') },
+            { icon: <Settings size={28} />, label: 'Settings', action: () => openWindow('settings', 'Settings') },
+          ].map(({ icon, label, action }) => (
+            <button
+              key={label}
+              onClick={action}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 12, padding: '10px 8px', cursor: 'pointer', width: 72,
+                color: 'white', backdropFilter: 'blur(8px)',
+                transition: 'background 0.15s, transform 0.1s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.18)'; (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.05)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.08)'; (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
+            >
+              {icon}
+              <span style={{ fontSize: 10, fontWeight: 500, textAlign: 'center', lineHeight: 1.2, textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}>{label}</span>
+            </button>
+          ))}
+        </div>
 
         {/* Windows Rendering */}
         {windows.map(win => (
@@ -264,9 +258,30 @@ const MOCK_STRINGS = `<resources>
 
 const MOCK_DOC = `Consent form for Tony Kim, RRN: 950101-1234567`;
 
+const THREAT_CONFIG: Record<string, { color: string; bg: string; border: string; icon: React.ReactNode }> = {
+  CRITICAL: { color: '#cf1322', bg: '#fff1f0', border: '#ffa39e', icon: <XCircle size={14} color="#cf1322" /> },
+  WARNING:  { color: '#ad6800', bg: '#fffbe6', border: '#ffe58f', icon: <AlertTriangle size={14} color="#ad6800" /> },
+  SAFE:     { color: '#237804', bg: '#f6ffed', border: '#b7eb8f', icon: <CheckCircle size={14} color="#237804" /> },
+};
+
 const ThreatBadge: React.FC<{ level: string }> = ({ level }) => {
-  const colors: Record<string, string> = { CRITICAL: '#ff4d4f', WARNING: '#faad14', SAFE: '#52c41a' };
-  return <span style={{ padding: '2px 10px', borderRadius: 12, background: colors[level] || '#ccc', color: 'white', fontWeight: 700, fontSize: 12 }}>{level}</span>;
+  const cfg = THREAT_CONFIG[level] ?? { color: '#555', bg: '#f0f0f0', border: '#ccc', icon: null };
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '2px 10px', borderRadius: 20,
+      background: cfg.bg, border: `1px solid ${cfg.border}`,
+      color: cfg.color, fontWeight: 700, fontSize: 11, letterSpacing: 0.5,
+    }}>
+      {cfg.icon}{level}
+    </span>
+  );
+};
+
+const textareaStyle: React.CSSProperties = {
+  width: '100%', fontFamily: 'monospace', fontSize: 11, boxSizing: 'border-box',
+  border: '1px solid #d9d9d9', borderRadius: 6, padding: '6px 8px',
+  resize: 'vertical', outline: 'none', background: '#fafafa', lineHeight: 1.5,
 };
 
 const SecurityAuditWindow: React.FC = () => {
@@ -291,85 +306,159 @@ const SecurityAuditWindow: React.FC = () => {
 
     const apk = auditData?.apk_analysis;
     const pi = auditData?.pi_analysis;
+    const scoreColor = apk ? (apk.total_score >= 70 ? '#cf1322' : apk.total_score >= 40 ? '#faad14' : '#52c41a') : '#3b82f6';
 
     return (
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'auto' }}>
+            {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography.Title level={5} style={{ margin: 0 }}>Security Audit</Typography.Title>
-                <Button type="primary" icon={<ShieldAlert size={14} />} onClick={run} loading={loading} size="small">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <ShieldAlert size={18} color="#3b82f6" />
+                    <Typography.Title level={5} style={{ margin: 0, fontSize: 14 }}>Security Audit</Typography.Title>
+                </div>
+                <Button
+                    type="primary"
+                    icon={<ShieldAlert size={13} />}
+                    onClick={run}
+                    loading={loading}
+                    size="small"
+                    style={{ borderRadius: 6, fontSize: 12 }}
+                >
                     Run Audit
                 </Button>
             </div>
 
-            <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid #f0f0f0', paddingBottom: 8 }}>
-                {(['apk', 'pi'] as const).map(t => (
-                    <Button key={t} size="small" type={activeTab === t ? 'primary' : 'default'} onClick={() => setActiveTab(t)}>
-                        {t === 'apk' ? 'APK Analysis' : 'PI Document Scan'}
-                    </Button>
+            {/* Tabs */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #e8e8e8' }}>
+                {([['apk', 'APK Analysis'], ['pi', 'PI Document Scan']] as const).map(([t, label]) => (
+                    <button
+                        key={t}
+                        onClick={() => setActiveTab(t)}
+                        style={{
+                            height: 32, padding: '0 14px', border: 'none', background: 'transparent', cursor: 'pointer',
+                            fontSize: 12, fontWeight: activeTab === t ? 600 : 400,
+                            color: activeTab === t ? '#3b82f6' : '#666',
+                            borderBottom: activeTab === t ? '2px solid #3b82f6' : '2px solid transparent',
+                        }}
+                    >
+                        {label}
+                    </button>
                 ))}
             </div>
 
             {activeTab === 'apk' ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div>
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>APK Manifest XML</Typography.Text>
-                        <textarea value={manifest} onChange={e => setManifest(e.target.value)} rows={5} style={{ width: '100%', fontFamily: 'monospace', fontSize: 11, boxSizing: 'border-box' }} />
+                        <label style={{ fontSize: 11, color: '#888', fontWeight: 500, display: 'block', marginBottom: 4 }}>APK Manifest XML</label>
+                        <textarea value={manifest} onChange={e => setManifest(e.target.value)} rows={5} style={textareaStyle} />
                     </div>
                     <div>
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>String Resources XML</Typography.Text>
-                        <textarea value={strings} onChange={e => setStrings(e.target.value)} rows={4} style={{ width: '100%', fontFamily: 'monospace', fontSize: 11, boxSizing: 'border-box' }} />
+                        <label style={{ fontSize: 11, color: '#888', fontWeight: 500, display: 'block', marginBottom: 4 }}>String Resources XML</label>
+                        <textarea value={strings} onChange={e => setStrings(e.target.value)} rows={4} style={textareaStyle} />
                     </div>
                     {apk && (
-                        <Card size="small">
-                            <Space>
+                        <div style={{ border: `1px solid ${THREAT_CONFIG[apk.threat_level]?.border ?? '#d9d9d9'}`, borderRadius: 8, overflow: 'hidden' }}>
+                            {/* Score header */}
+                            <div style={{ padding: '10px 14px', background: THREAT_CONFIG[apk.threat_level]?.bg ?? '#fff', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 12 }}>
                                 <ThreatBadge level={apk.threat_level} />
-                                <Typography.Text>Score: <b>{apk.total_score}/100</b></Typography.Text>
-                                <Typography.Text type="secondary" style={{ fontSize: 11 }}>Perms: {apk.score_breakdown.permission_score} | URLs: {apk.score_breakdown.url_score}</Typography.Text>
-                            </Space>
-                            <div style={{ marginTop: 8, fontSize: 12 }}>{apk.summary}</div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                        <span style={{ fontSize: 11, color: '#666' }}>Threat Score</span>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: scoreColor }}>{apk.total_score}/100</span>
+                                    </div>
+                                    <Progress percent={apk.total_score} showInfo={false} strokeColor={scoreColor} size="small" style={{ margin: 0 }} />
+                                </div>
+                            </div>
+                            {/* Score breakdown */}
+                            <div style={{ padding: '8px 14px', background: '#fff', display: 'flex', gap: 16, borderBottom: '1px solid #f5f5f5' }}>
+                                <span style={{ fontSize: 11, color: '#555' }}>Permissions <b style={{ color: '#cf1322' }}>+{apk.score_breakdown.permission_score}</b></span>
+                                <span style={{ fontSize: 11, color: '#555' }}>URLs <b style={{ color: '#ad6800' }}>+{apk.score_breakdown.url_score}</b></span>
+                            </div>
+                            <div style={{ padding: '6px 14px', background: '#fff', fontSize: 11, color: '#666' }}>{apk.summary}</div>
+                            {/* Permission findings */}
                             {apk.permission_findings.length > 0 && (
-                                <div style={{ marginTop: 8 }}>
-                                    <b style={{ fontSize: 11 }}>Permissions</b>
+                                <div style={{ padding: '8px 14px', background: '#fff5f5', borderTop: '1px solid #fff1f0' }}>
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: '#cf1322', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <Lock size={12} />DANGEROUS PERMISSIONS
+                                    </div>
                                     {apk.permission_findings.map((f, i) => (
-                                        <div key={i} style={{ fontSize: 11, color: '#d46' }}>{f.permission} (+{f.score}): {f.reason}</div>
+                                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 4, fontSize: 11 }}>
+                                            <span style={{ background: '#ff4d4f', color: 'white', borderRadius: 4, padding: '0 5px', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>+{f.score}</span>
+                                            <div>
+                                                <code style={{ fontSize: 10, color: '#cf1322', background: '#fff0f0', padding: '0 4px', borderRadius: 3 }}>{f.permission}</code>
+                                                <div style={{ color: '#888', marginTop: 2 }}>{f.reason}</div>
+                                            </div>
+                                        </div>
                                     ))}
                                 </div>
                             )}
+                            {/* URL findings */}
                             {apk.url_findings.length > 0 && (
-                                <div style={{ marginTop: 8 }}>
-                                    <b style={{ fontSize: 11 }}>URLs</b>
+                                <div style={{ padding: '8px 14px', background: '#fffcf0', borderTop: '1px solid #fff7e6' }}>
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: '#ad6800', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <Link size={12} />SUSPICIOUS URLs
+                                    </div>
                                     {apk.url_findings.map((f, i) => (
-                                        <div key={i} style={{ fontSize: 11, color: '#c60' }}>{f.url} (+{f.score})</div>
+                                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 4, fontSize: 11 }}>
+                                            <span style={{ background: '#faad14', color: 'white', borderRadius: 4, padding: '0 5px', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>+{f.score}</span>
+                                            <code style={{ fontSize: 10, color: '#ad6800', background: '#fffbe6', padding: '0 4px', borderRadius: 3, wordBreak: 'break-all' }}>{f.url}</code>
+                                        </div>
                                     ))}
                                 </div>
                             )}
-                        </Card>
+                        </div>
                     )}
                 </div>
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div>
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>Document Text</Typography.Text>
-                        <textarea value={docText} onChange={e => setDocText(e.target.value)} rows={4} style={{ width: '100%', fontSize: 12, boxSizing: 'border-box' }} />
+                        <label style={{ fontSize: 11, color: '#888', fontWeight: 500, display: 'block', marginBottom: 4 }}>Document Text</label>
+                        <textarea value={docText} onChange={e => setDocText(e.target.value)} rows={5} style={{ ...textareaStyle, fontFamily: 'inherit', fontSize: 12 }} />
                     </div>
                     {pi && (
-                        <Card size="small">
-                            <Space>
+                        <div style={{ border: `1px solid ${THREAT_CONFIG[pi.risk]?.border ?? '#d9d9d9'}`, borderRadius: 8, overflow: 'hidden' }}>
+                            <div style={{ padding: '10px 14px', background: THREAT_CONFIG[pi.risk]?.bg ?? '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
                                 <ThreatBadge level={pi.risk} />
-                                <Typography.Text>Encryption: <b>{pi.encryption}</b></Typography.Text>
-                            </Space>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                                    <Lock size={13} color="#3b82f6" />
+                                    <span style={{ color: '#555' }}>Encryption:</span>
+                                    <b style={{ color: '#1d4ed8' }}>{pi.encryption}</b>
+                                </div>
+                            </div>
                             {pi.details.length > 0 && (
-                                <div style={{ marginTop: 8 }}>
-                                    {pi.details.map((d, i) => <div key={i} style={{ fontSize: 12, color: '#d46' }}>{d}</div>)}
+                                <div style={{ padding: '8px 14px', background: '#fff' }}>
+                                    {pi.details.map((d, i) => (
+                                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#cf1322', marginBottom: 4 }}>
+                                            <AlertTriangle size={12} />{d}
+                                        </div>
+                                    ))}
                                 </div>
                             )}
-                        </Card>
+                        </div>
                     )}
                 </div>
             )}
         </div>
     );
 };
+
+const FormInput: React.FC<{ label: string; value: string; onChange: (v: string) => void; placeholder?: string }> = ({ label, value, onChange, placeholder }) => (
+    <div>
+        <label style={{ fontSize: 11, color: '#888', fontWeight: 500, display: 'block', marginBottom: 4 }}>{label}</label>
+        <input
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            placeholder={placeholder}
+            style={{
+                width: '100%', padding: '6px 10px', fontSize: 12, boxSizing: 'border-box',
+                border: '1px solid #d9d9d9', borderRadius: 6, outline: 'none', background: '#fafafa',
+                transition: 'border-color 0.15s',
+            }}
+            onFocus={e => { e.target.style.borderColor = '#3b82f6'; }}
+            onBlur={e => { e.target.style.borderColor = '#d9d9d9'; }}
+        />
+    </div>
+);
 
 const ConsentWindow: React.FC = () => {
     const [form, setForm] = React.useState({ teacher_id: 'Teacher01', title: 'Field Trip Consent', parent_id: 'Parent01', signature: '0.1,0.5,0.9,1.2,1.5,2.0' });
@@ -391,41 +480,58 @@ const ConsentWindow: React.FC = () => {
         }
     };
 
-    const inputStyle = { width: '100%', padding: '4px 8px', fontSize: 12, boxSizing: 'border-box' as const };
+    const verified = result?.integrity === 'VERIFIED';
 
     return (
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <Typography.Title level={5} style={{ margin: 0 }}>NFT E-Consent</Typography.Title>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                {([['teacher_id', 'Teacher ID'], ['title', 'Form Title'], ['parent_id', 'Parent ID']] as const).map(([key, label]) => (
-                    <div key={key} style={{ gridColumn: key === 'title' ? '1 / -1' : undefined }}>
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>{label}</Typography.Text>
-                        <input value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} style={inputStyle} />
-                    </div>
-                ))}
+        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <FileSignature size={18} color="#3b82f6" />
+                <Typography.Title level={5} style={{ margin: 0, fontSize: 14 }}>NFT E-Consent</Typography.Title>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <FormInput label="Teacher ID" value={form.teacher_id} onChange={v => setForm(f => ({ ...f, teacher_id: v }))} />
+                <FormInput label="Parent ID" value={form.parent_id} onChange={v => setForm(f => ({ ...f, parent_id: v }))} />
                 <div style={{ gridColumn: '1 / -1' }}>
-                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>Biometric Signature (comma-separated floats, &gt;5 values = VERIFIED)</Typography.Text>
-                    <input value={form.signature} onChange={e => setForm(f => ({ ...f, signature: e.target.value }))} style={inputStyle} />
+                    <FormInput label="Form Title" value={form.title} onChange={v => setForm(f => ({ ...f, title: v }))} />
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontSize: 11, color: '#888', fontWeight: 500, display: 'block', marginBottom: 4 }}>
+                        Biometric Signature <span style={{ color: '#bbb' }}>(comma-separated floats, &gt;5 values = VERIFIED)</span>
+                    </label>
+                    <input
+                        value={form.signature}
+                        onChange={e => setForm(f => ({ ...f, signature: e.target.value }))}
+                        style={{ width: '100%', padding: '6px 10px', fontSize: 12, boxSizing: 'border-box', border: '1px solid #d9d9d9', borderRadius: 6, outline: 'none', background: '#fafafa', fontFamily: 'monospace' }}
+                    />
                 </div>
             </div>
-            <Button type="primary" onClick={submit} loading={loading} size="small">Sign Consent</Button>
-            {error && <Typography.Text type="danger" style={{ fontSize: 12 }}>{error}</Typography.Text>}
+
+            <Button type="primary" onClick={submit} loading={loading} style={{ borderRadius: 6, alignSelf: 'flex-start' }}>
+                Sign Consent
+            </Button>
+
+            {error && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: '#fff1f0', border: '1px solid #ffa39e', borderRadius: 6, fontSize: 12, color: '#cf1322' }}>
+                    <XCircle size={13} />{error}
+                </div>
+            )}
+
             {result && (
-                <Card size="small">
-                    <Space wrap>
-                        <Typography.Text><b>NFT ID:</b> {result.nft_id}</Typography.Text>
-                        <span style={{ padding: '2px 10px', borderRadius: 12, background: result.integrity === 'VERIFIED' ? '#52c41a' : '#faad14', color: 'white', fontWeight: 700, fontSize: 12 }}>
-                            {result.integrity}
-                        </span>
-                    </Space>
-                    <div style={{ marginTop: 8, fontSize: 11 }}>
-                        <div><b>Status:</b> {result.block.data.status}</div>
-                        <div><b>Owner:</b> {result.block.data.owner}</div>
-                        <div style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all', color: '#888' }}>
-                            Block: {result.block.block_hash}
+                <div style={{ border: `1px solid ${verified ? '#b7eb8f' : '#ffe58f'}`, borderRadius: 8, overflow: 'hidden' }}>
+                    <div style={{ padding: '10px 14px', background: verified ? '#f6ffed' : '#fffbe6', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid #f0f0f0' }}>
+                        {verified ? <CheckCircle size={16} color="#52c41a" /> : <AlertTriangle size={16} color="#faad14" />}
+                        <span style={{ fontWeight: 700, fontSize: 13, color: verified ? '#237804' : '#ad6800' }}>{result.integrity}</span>
+                        <span style={{ fontSize: 11, color: '#888', marginLeft: 4 }}>NFT ID: <code style={{ fontSize: 10, background: '#f0f0f0', padding: '0 4px', borderRadius: 3 }}>{result.nft_id}</code></span>
+                    </div>
+                    <div style={{ padding: '10px 14px', background: '#fff', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ fontSize: 12 }}><span style={{ color: '#888' }}>Status:</span> <b>{result.block.data.status}</b></div>
+                        <div style={{ fontSize: 12 }}><span style={{ color: '#888' }}>Owner:</span> <b>{result.block.data.owner}</b></div>
+                        <div style={{ marginTop: 6, fontFamily: 'monospace', fontSize: 10, color: '#aaa', wordBreak: 'break-all', background: '#fafafa', padding: '6px 8px', borderRadius: 4 }}>
+                            {result.block.block_hash}
                         </div>
                     </div>
-                </Card>
+                </div>
             )}
         </div>
     );
