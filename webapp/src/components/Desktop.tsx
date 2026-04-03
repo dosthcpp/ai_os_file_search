@@ -16,6 +16,7 @@ import {
   Link,
   Lock,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useOSStore, WindowType } from '../store';
 import { runSecurityAudit, signConsent, getSecurityTestCases, SecurityAuditResult, ConsentSignResult, SecurityTestCase } from '../api';
 import WindowFrame from './WindowFrame';
@@ -122,33 +123,24 @@ const Desktop: React.FC = () => {
             { icon: <FileSignature size={24} />, label: 'E-Consent', action: () => openWindow('consent', 'E-Consent'), color: '#10b981' },
             { icon: <Settings size={24} />, label: 'Settings', action: () => openWindow('settings', 'Settings'), color: '#6b7280' },
           ].map(({ icon, label, action, color }) => (
-            <button
+            <motion.button
               key={label}
+              whileHover={{ scale: 1.1, backgroundColor: `${color}33`, borderColor: `${color}66`, boxShadow: `0 8px 24px ${color}44` }}
+              whileTap={{ scale: 0.95 }}
               onClick={action}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                 background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: 14, padding: '10px 8px', cursor: 'pointer', width: 68,
                 color: 'white', backdropFilter: 'blur(12px)',
-                transition: 'background 0.15s, transform 0.12s, box-shadow 0.15s',
+                transition: 'background 0.2s, border-color 0.2s, box-shadow 0.2s',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-              }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLButtonElement).style.background = `${color}33`;
-                (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.06)';
-                (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 4px 16px ${color}44`;
-                (e.currentTarget as HTMLButtonElement).style.borderColor = `${color}66`;
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)';
-                (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
-                (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.1)';
+                outline: 'none',
               }}
             >
               <span style={{ color }}>{icon}</span>
               <span style={{ fontSize: 10, fontWeight: 500, textAlign: 'center', lineHeight: 1.2, textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>{label}</span>
-            </button>
+            </motion.button>
           ))}
         </div>
 
@@ -206,8 +198,7 @@ const Desktop: React.FC = () => {
                     if (win.isMinimized) {
                       restoreWindow(win.id);
                     } else if (activeWindowId === win.id) {
-                      // Maybe minimize if clicking active? Puter style
-                      // useOSStore.getState().minimizeWindow(win.id);
+                      useOSStore.getState().minimizeWindow(win.id);
                     } else {
                       focusWindow(win.id);
                     }

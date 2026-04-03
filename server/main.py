@@ -190,6 +190,12 @@ _DANGEROUS_PERMISSIONS = {
     "CALL_PHONE":              {"score": 20, "reason": "Can silently initiate phone calls — used in voice phishing (vishing) attacks"},
     "DISABLE_KEYGUARD":        {"score": 30, "reason": "Can bypass screen lock — used by ransomware to prevent victim from accessing device"},
     "WRITE_EXTERNAL_STORAGE":  {"score": 15, "reason": "Can write files to external storage — used for ransomware data staging and payload delivery"},
+    "MANAGE_EXTERNAL_STORAGE": {"score": 35, "reason": "Full access to all files on external storage — high risk of ransomware or data theft"},
+    "READ_MEDIA_IMAGES":       {"score": 15, "reason": "Access to private photos — privacy leak risk"},
+    "READ_MEDIA_VIDEO":        {"score": 15, "reason": "Access to private videos — privacy leak risk"},
+    "READ_MEDIA_AUDIO":        {"score": 15, "reason": "Access to private audio files — privacy leak risk"},
+    "ACCESS_BACKGROUND_LOCATION": {"score": 25, "reason": "Continuous location tracking even when app is closed — stalkerware behavior"},
+    "BODY_SENSORS":            {"score": 15, "reason": "Access to health/fitness data — sensitive PII leak"},
 }
 
 _SUSPICIOUS_URL_PATTERNS = [
@@ -212,6 +218,12 @@ _SUSPICIOUS_URL_PATTERNS = [
      "Algorithmically-generated domain (DGA) pattern — characteristic of botnet C2 communication", 25),
     (_re.compile(r'https?://[^\s"\']*ngrok\.io[^\s"\']*'),
      "ngrok reverse-proxy tunnel — commonly used to expose local C2 servers from behind NAT", 25),
+    (_re.compile(r'https?://[^\s"\']*(?:pastebin|ghostbin|hastebin|pastie|justpaste\.it)[^\s"\']*'),
+     "Paste site URL — often used to host malicious scripts, configurations, or exfiltrated data", 20),
+    (_re.compile(r'https?://[^\s"\']*(?:githubusercontent|bitbucket\.org|gitlab\.com)[^\s"\']*'),
+     "Code hosting site — may be used to fetch secondary payloads or configuration from legitimate services", 15),
+    (_re.compile(r'https?://[^\s"\']*(?:bit\.ly|t\.co|tinyurl\.com|is\.gd|buff\.ly|rebrand\.ly)[^\s"\']*'),
+     "URL shortener — masks the final malicious destination to bypass security filters", 15),
 ]
 
 _SENSITIVE_PI_PATTERNS = {
@@ -416,6 +428,54 @@ SECURITY_TEST_CASES = [
         "manifest": "",
         "strings": "",
         "document_text": "Patient Record — CONFIDENTIAL\nName: Park Soomin\nRRN: 750620-1234567\nPassport No: M98765432\nInsurance Card: 4916338506082832\nEmail: soomin.park@gmail.com\nEmergency Contact Bank: 88901234567890\nDiagnosis: [REDACTED]\nAdmission Date: 2026-03-15",
+    },
+    {
+        "id": "tc_25",
+        "name": "TC-25: Multi-Stage PowerShell Dropper",
+        "description": "App masquerading as a system tool that fetches and executes a PowerShell-based secondary payload from a public code hosting service",
+        "manifest": '<manifest package="com.windows.compatibility.layer">\n  <uses-permission android:name="android.permission.INTERNET"/>\n  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>\n</manifest>',
+        "strings": '<resources>\n  <string name="update_script">https://raw.githubusercontent.com/evil-ops/scripts/main/rev_shell.ps1</string>\n  <string name="c2_relay">https://bit.ly/secure-tunnel-2026</string>\n</resources>',
+        "document_text": "",
+    },
+    {
+        "id": "tc_26",
+        "name": "TC-26: Private Photo & Video Exfiltrator",
+        "description": "Malicious gallery app requesting broad media access to silently upload private user photos and videos to a high-risk TLD server",
+        "manifest": '<manifest package="com.pro.gallery.vault">\n  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>\n  <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>\n  <uses-permission android:name="android.permission.INTERNET"/>\n</manifest>',
+        "strings": '<resources>\n  <string name="upload_server">http://cloud-storage-pro.xyz/v1/sync</string>\n</resources>',
+        "document_text": "",
+    },
+    {
+        "id": "tc_27",
+        "name": "TC-27: Background GPS Stalkerware (Advanced)",
+        "description": "Stealthy stalkerware that tracks precise location in the background and uploads movement history to an obfuscated DGA domain",
+        "manifest": '<manifest package="com.battery.saver.plus">\n  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>\n  <uses-permission android:name="android.permission.INTERNET"/>\n</manifest>',
+        "strings": '<resources>\n  <string name="telemetry">https://asdfghjklqwerty.top/report</string>\n</resources>',
+        "document_text": "",
+    },
+    {
+        "id": "tc_28",
+        "name": "TC-28: Ransomware with Full Storage Access",
+        "description": "Ransomware requesting MANAGE_EXTERNAL_STORAGE to encrypt all user files (including documents and downloads) while disabling screen lock",
+        "manifest": '<manifest package="com.disk.analyzer.utility">\n  <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>\n  <uses-permission android:name="android.permission.DISABLE_KEYGUARD"/>\n  <uses-permission android:name="android.permission.INTERNET"/>\n</manifest>',
+        "strings": '<resources>\n  <string name="c2">http://185.120.220.10:8080/ransom</string>\n  <string name="payment_site">https://decrypt-my-files.cc/pay</string>\n</resources>',
+        "document_text": "",
+    },
+    {
+        "id": "tc_29",
+        "name": "TC-29: PII — Real Estate Contract Leak",
+        "description": "Scanned real estate contract containing buyer/seller PII, RRNs, bank account for deposit, and detailed address information",
+        "manifest": "",
+        "strings": "",
+        "document_text": "부동산 매매 계약서\n매도인: 최영희\n주민등록번호: 600510-2345678\n주소: 서울특별시 강남구 역삼동 123-45\n계좌번호: 국민은행 09876543210987\n\n매수인: 박철수\n주민등록번호: 821212-1234567\n연락처: 010-9988-7766\n이메일: chulsoo.park@gmail.com",
+    },
+    {
+        "id": "tc_30",
+        "name": "TC-30: Comprehensive Identity Theft Document",
+        "description": "Document containing multiple PII types: Passport, Credit Card, Email, and Resident Registration Number",
+        "manifest": "",
+        "strings": "",
+        "document_text": "Identity Verification Form\nFull Name: Alice Winston\nRRN: 900725-2019382\nPassport Number: P102938475\nPersonal Email: alice.winston@outlook.com\nCredit Card for Verification: 5520112233445566\nBilling Address: 742 Evergreen Terrace, Springfield",
     },
 ]
 
